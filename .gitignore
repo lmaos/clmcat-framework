@@ -1,0 +1,13 @@
+/.idea/
+.idea/*
+**/.idea/
+**/target/
+.eclipse
+.project
+.classpath
+.settings/
+
+**/.eclipse
+**/.project
+**/.classpath
+**/.settings/

@@ -1,0 +1,1 @@
+org.springframework.boot.autoconfigure.EnableAutoConfiguration=com.clmcat.framework.webmvc.protobuf.ProtobufAutoConfiguration

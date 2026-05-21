@@ -1,0 +1,25 @@
+syntax = "proto3";
+option java_package = "org.ns.framework.webmvc.protobuf.entity";
+option java_multiple_files = true;
+/**
+ * protobuf响应实体
+
+  protoc --java_out=../java/ ProtoResponseEntity.proto
+ */
+message ProtoResponseEntity {
+  optional string requestId = 1;
+  optional int32 status = 2;
+  optional string state = 3;
+  optional string message = 4;
+  optional DataType dataType = 5;
+  optional bytes data = 6;
+  optional string errplace = 7;
+}
+/**
+ * 数据类型枚举
+ */
+enum DataType {
+  NONE = 0;
+  PROTOBUF = 1;
+  JSON_STRING = 2;
+}
