@@ -35,8 +35,8 @@ class ReqParamDemoIntegrationTest {
                         .param("phone", "1234")
                         .param("countryCode", "+86"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.phone").value("1234"))
-                .andExpect(jsonPath("$.countryCode").value("+86"));
+                .andExpect(jsonPath("$.content.phone").value("1234"))
+                .andExpect(jsonPath("$.content.countryCode").value("+86"));
     }
 
     @Test
@@ -46,9 +46,9 @@ class ReqParamDemoIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"countryCode\":\"+86\",\"code\":\"4321\"}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.phone").value("1234"))
-                .andExpect(jsonPath("$.countryCode").value("+86"))
-                .andExpect(jsonPath("$.code").value("4321"));
+                .andExpect(jsonPath("$.content.phone").value("1234"))
+                .andExpect(jsonPath("$.content.countryCode").value("+86"))
+                .andExpect(jsonPath("$.content.code").value("4321"));
     }
 
     @Test
@@ -57,9 +57,9 @@ class ReqParamDemoIntegrationTest {
                         .param("phone", "1234")
                         .content("{\"countryCode\":\"+86\",\"code\":\"4321\"}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.phone").value("1234"))
-                .andExpect(jsonPath("$.countryCode").value("+86"))
-                .andExpect(jsonPath("$.code").value("4321"));
+                .andExpect(jsonPath("$.content.phone").value("1234"))
+                .andExpect(jsonPath("$.content.countryCode").value("+86"))
+                .andExpect(jsonPath("$.content.code").value("4321"));
     }
 
     @Test
@@ -68,6 +68,6 @@ class ReqParamDemoIntegrationTest {
                         .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                         .content("id=12"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").value(12));
+                .andExpect(jsonPath("$.content.id").value(12));
     }
 }

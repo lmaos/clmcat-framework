@@ -119,6 +119,28 @@ class RequestParamInjectorUnitTest {
     }
 
     @Test
+    void shouldResolveSimpleHeaderParameter() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/reqparam");
+        request.addHeader("token", "header-token");
+
+        Object value = injector.resolveArgument(methodParameter("headerToken"), new ModelAndViewContainer(),
+                new ServletWebRequest(request, new MockHttpServletResponse()), null);
+
+        assertEquals("header-token", value);
+    }
+
+    @Test
+    void shouldResolveSimpleCookieParameter() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/reqparam");
+        request.setCookies(new Cookie("session", "cookie-token"));
+
+        Object value = injector.resolveArgument(methodParameter("cookieToken"), new ModelAndViewContainer(),
+                new ServletWebRequest(request, new MockHttpServletResponse()), null);
+
+        assertEquals("cookie-token", value);
+    }
+
+    @Test
     void shouldResolveHeaderScopedFieldOnBean() throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/reqparam");
         request.addParameter("phone", "1234");
@@ -147,6 +169,19 @@ class RequestParamInjectorUnitTest {
     }
 
     @Test
+    void shouldBindBeanWithExplicitPrefix() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/reqparam");
+        request.addParameter("payload.phone", "1234");
+        request.addParameter("payload.countryCode", "+86");
+
+        PhoneLoginDto value = (PhoneLoginDto) injector.resolveArgument(methodParameter("prefixedPhoneLogin"),
+                new ModelAndViewContainer(), new ServletWebRequest(request, new MockHttpServletResponse()), null);
+
+        assertEquals("1234", value.getPhone());
+        assertEquals("+86", value.getCountryCode());
+    }
+
+    @Test
     void shouldIgnoreCustomRequestParameterWhenScopeIsNone() throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/reqparam");
         ServletWebRequest webRequest = new ServletWebRequest(request, new MockHttpServletResponse());
@@ -169,6 +204,19 @@ class RequestParamInjectorUnitTest {
 
         assertEquals("1234", value.getPhone());
         assertEquals("4321", value.getCode());
+    }
+
+    @Test
+    void shouldApplyFieldDefaultValueOnBean() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/reqparam");
+        request.addParameter("phone", "1234");
+
+        DefaultValuePhoneLoginDto value = (DefaultValuePhoneLoginDto) injector.resolveArgument(
+                methodParameter("defaultValuePhoneLogin"), new ModelAndViewContainer(),
+                new ServletWebRequest(request, new MockHttpServletResponse()), null);
+
+        assertEquals("1234", value.getPhone());
+        assertEquals("guest", value.getCode());
     }
 
     private HttpServletRequest applyFormContentFilter(MockHttpServletRequest request) throws Exception {
@@ -206,16 +254,28 @@ class RequestParamInjectorUnitTest {
         void defaultedName(@Params(name = "name", required = false, defaultValue = "guest") String name) {
         }
 
+        void headerToken(@Params(name = "token", scope = ParamsScope.HEADER) String token) {
+        }
+
+        void cookieToken(@Params(name = "session", scope = ParamsScope.COOKIE) String token) {
+        }
+
         void headerAwarePhoneLogin(@Params HeaderAwarePhoneLoginDto dto) {
         }
 
         void cookieAwarePhoneLogin(@Params CookieAwarePhoneLoginDto dto) {
         }
 
+        void prefixedPhoneLogin(@Params("payload") PhoneLoginDto dto) {
+        }
+
         void noneScopedId(@Params(name = "id", required = false, scope = ParamsScope.NONE) Integer id) {
         }
 
         void base64PhoneLogin(@Params(authEncrypt = ParamsAuthEncrypt.BASE64) PhoneLoginDto dto) {
+        }
+
+        void defaultValuePhoneLogin(@Params DefaultValuePhoneLoginDto dto) {
         }
     }
 
@@ -262,6 +322,29 @@ class RequestParamInjectorUnitTest {
 
         public void setSessionId(String sessionId) {
             this.sessionId = sessionId;
+        }
+    }
+
+    private static class DefaultValuePhoneLoginDto {
+        private String phone;
+
+        @Params(required = false, defaultValue = "guest")
+        private String code;
+
+        public String getPhone() {
+            return phone;
+        }
+
+        public void setPhone(String phone) {
+            this.phone = phone;
+        }
+
+        public String getCode() {
+            return code;
+        }
+
+        public void setCode(String code) {
+            this.code = code;
         }
     }
 }

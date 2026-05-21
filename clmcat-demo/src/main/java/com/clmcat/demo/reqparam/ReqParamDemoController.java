@@ -3,14 +3,14 @@ package com.clmcat.demo.reqparam;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+import com.clmcat.framework.webmvc.anns.ApiController;
 import com.clmcat.framework.webmvc.anns.Params;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
 
-@RestController
+@ApiController
 @RequestMapping("/reqparam")
 public class ReqParamDemoController {
 
