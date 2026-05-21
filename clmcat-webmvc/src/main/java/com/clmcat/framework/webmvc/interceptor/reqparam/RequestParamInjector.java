@@ -1,13 +1,13 @@
 package com.clmcat.framework.webmvc.interceptor.reqparam;
 
 import java.io.InputStream;
-import java.lang.annotation.Annotation;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.math.BigDecimal;
 import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.security.PrivateKey;
 import java.sql.Timestamp;
 import java.util.ArrayList;
@@ -20,12 +20,10 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
-
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.math.NumberUtils;
-import org.apache.tomcat.util.http.fileupload.IOUtils;
 import com.clmcat.basics.commons.util.CodecUtils;
 import com.clmcat.basics.commons.util.DefaultVal;
 import com.clmcat.basics.commons.util.RSAUtil;
@@ -33,8 +31,6 @@ import com.clmcat.framework.webmvc.ResponseStatus;
 import com.clmcat.framework.webmvc.anns.Params;
 import com.clmcat.framework.webmvc.anns.Params.ParamsAuthEncrypt;
 import com.clmcat.framework.webmvc.anns.Params.ParamsScope;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.context.EnvironmentAware;
 import org.springframework.core.MethodParameter;
 import org.springframework.core.annotation.AnnotatedElementUtils;
@@ -50,341 +46,389 @@ import org.springframework.web.method.support.ModelAndViewContainer;
 import com.alibaba.fastjson.JSONObject;
 
 public class RequestParamInjector implements HandlerMethodArgumentResolver, EnvironmentAware {
-	private static final Logger log = LoggerFactory.getLogger(RequestParamInjector.class);
-	private static final Map<Class<?>, List<MethodWrapper>> setMethodCaches = new ConcurrentHashMap<>();
-	private static final Map<Class<?>, List<MethodWrapper>> setParamMethodCaches = new ConcurrentHashMap<>();
+	private static final String CURRENT_BODY_ATTR = "currentBody";
+	private static final String CURRENT_BODY_TEXT_ATTR = "currentBodyText";
+	private static final String HEADER_CONTENT_TYPE = "Content-Type";
+	private static final String HEADER_BODY_AUTH_NAME = "body-auth-name";
+	private static final String HEADER_BODY_AUTH_ENCRYPT = "body-auth-encrypt";
+	private static final String HEADER_BODY_AUTH_DECODE = "body-auth-decode";
 
-	private static final Map<String, ParamAuth> authMap = new ConcurrentHashMap<>();
-	
+	private static final Map<String, List<MethodWrapper>> setMethodCaches = new ConcurrentHashMap<>();
+	private static final Map<String, String> authPasswordCache = new ConcurrentHashMap<>();
+
+	private Environment environment;
+
 	@Override
 	public boolean supportsParameter(MethodParameter parameter) {
-		boolean ok = parameter.hasParameterAnnotation(Params.class);
-		return ok;
+		return parameter.hasParameterAnnotation(Params.class);
 	}
-	
-	private Environment environment;
+
 	@Override
 	public void setEnvironment(Environment environment) {
 		this.environment = environment;
-		
 	}
 
 	@Override
 	public Object resolveArgument(MethodParameter parameter, ModelAndViewContainer mavContainer,
 			NativeWebRequest webRequest, WebDataBinderFactory binderFactory) throws Exception {
-		HttpServletRequest httpServletRequest = webRequest.getNativeRequest(HttpServletRequest.class);
-		String method = httpServletRequest.getMethod();
-		String contentType = webRequest.getHeader("Content-Type");
-		String bodyAuthName = webRequest.getHeader("body-auth-name");
-		Params params = AnnotatedElementUtils.getMergedAnnotation(parameter.getParameter(), Params.class);
-		if (params.scope() == ParamsScope.HEADER || params.scope() == ParamsScope.COOKIE) {
-			return applicationForm(parameter, mavContainer, webRequest, binderFactory);
-		}
-		if ("GET".equalsIgnoreCase(method)) {
-			return applicationForm(parameter, mavContainer, webRequest, binderFactory);
-		} else if (contentType != null && contentType.startsWith("application/json")) {
+		Params params = getParams(parameter);
+		if (shouldUseJsonResolver(params, webRequest)) {
 			return applicationJson(parameter, mavContainer, webRequest, binderFactory);
-		} else if (StringUtils.isNotBlank(bodyAuthName)) { // 授权解析
-			return applicationJson(parameter, mavContainer, webRequest, binderFactory);
-		} else {
-			return applicationForm(parameter, mavContainer, webRequest, binderFactory);
 		}
+		return applicationForm(parameter, mavContainer, webRequest, binderFactory);
 	}
 
 	public Object applicationJson(MethodParameter parameter, ModelAndViewContainer mavContainer,
 			NativeWebRequest webRequest, WebDataBinderFactory binderFactory) throws Exception {
-		HttpServletRequest request = webRequest.getNativeRequest(HttpServletRequest.class);
-		Params params = AnnotatedElementUtils.getMergedAnnotation(parameter.getParameter(), Params.class);
-		String contentLength = webRequest.getHeader("Content-Length");
-		JSONObject jsonobj = (JSONObject) webRequest.getAttribute("currentBody", RequestAttributes.SCOPE_REQUEST);
-		if (jsonobj == null) {
-			InputStream in = request.getInputStream();
-			int length = NumberUtils.toInt(contentLength);
-			if (length > 0) {
-				byte[] data = new byte[length];
-				IOUtils.readFully(in, data, 0, data.length);
-				String json = new String(data, Charset.forName("UTF-8")).trim();
-				// 验证是否加密了 
-				json = bodyAuthDecipher(params, webRequest, json);
-				if (json.startsWith("{") && json.endsWith("}")) {
-					jsonobj = JSONObject.parseObject(json);
-				}
-			}
-			if (jsonobj == null) {
-				jsonobj = new JSONObject();
-			}
-			webRequest.setAttribute("currentBody", jsonobj, RequestAttributes.SCOPE_REQUEST);
-		}
-		// // // // // // // // // // // // // // // // // /// // // // 
-		CustomRequestParameter.getOrCreate(webRequest).fill(jsonobj);
-		
+		Params params = getParams(parameter);
+		JSONObject jsonObject = getRequestJsonBody(webRequest, params);
+		CustomRequestParameter.getOrCreate(webRequest).fill(jsonObject);
+
 		Class<?> type = parameter.getParameterType();
-
-		if (DefaultVal.getConvertType(type) != null) {
-			
-			String name = params.name();
-			if (name.isEmpty()) {
-				name = parameter.getParameter().getName();
-			}
-			Object value = null;
-			if (params.scope() != ParamsScope.PARAM && params.scope() != ParamsScope.NONE) { // header, cookie
-				String param = getParam(name, params, webRequest);
-				value = parse(param, type);
-			} else {
-				value = getJson(name, jsonobj, type);
-			}
-			
-			if (value == null) { // 从参数获取.
-//				String param = webRequest.getParameter(name);
-				String param = getParam(name, params, webRequest);
-				value = parse(param, type);
-			}
-
-			if (value == null) {
-
-				if (!ValueConstants.DEFAULT_NONE.equals(params.defaultValue())) {
-					value = parse(params.defaultValue(), type);
-				} else if (params.required()) { //
-					throw new MissingServletRequestParameterException(name, type.getSimpleName());
-				} else {
-					value = DefaultVal.getDefaultValue(type);
-				}
-			}
-
-			// binderFactory.createBinder(webRequest, value, name).validate();
-
-			return value;
-		} else {
-			// bean
-
-			Object result = jsonobj.toJavaObject(type);
-			
-			List<MethodWrapper> methods = getSetParamMethods(type, null);
-			for (MethodWrapper mw : methods) {
-				if (mw.params != null) {
-					Object fvalue = null;
-					if (mw.params.scope() != ParamsScope.PARAM && mw.params.scope() != ParamsScope.NONE) {
-						String param = getParam(mw, params, webRequest);
-						fvalue = parse(param, mw.getType());
-						if (fvalue != null) {
-							mw.method.invoke(result, fvalue);
-						}
-					}
-					
-					if (params.required() && fvalue == null) {
-						if (!mw.hasValue(result)) {
-							throw new MissingServletRequestParameterException(mw.paramName, mw.getType().getSimpleName());
-						}
-					}
-				}
-			}
-			
-			return result;
+		if (isSimpleType(type)) {
+			return resolveSimpleJsonValue(parameter, params, webRequest, jsonObject);
 		}
+		return resolveJsonBean(type, params, webRequest, jsonObject);
 	}
 
 	public Object applicationForm(MethodParameter parameter, ModelAndViewContainer mavContainer,
 			NativeWebRequest webRequest, WebDataBinderFactory binderFactory) throws Exception {
-		// webRequest.setAttribute(null, binderFactory,
-		// RequestAttributes.SCOPE_REQUEST);
 		Class<?> type = parameter.getParameterType();
-		Params params = AnnotatedElementUtils.getMergedAnnotation(parameter.getParameter(), Params.class);
-		String name = params.name();
-		if (DefaultVal.getConvertType(type) != null) {
-			if (name.isEmpty()) {
-				name = parameter.getParameterName();
-			}
-			
-//			String param = webRequest.getParameter(name);
-			String param = getParam(name, params, webRequest);
-			Object value = parse(param, type);
-			if (value == null) {
-
-				if (!ValueConstants.DEFAULT_NONE.equals(params.defaultValue())) {
-					value = parse(params.defaultValue(), type);
-				} else if (params.required()) { //
-					throw new MissingServletRequestParameterException(name, type.getSimpleName());
-				} else {
-					value = DefaultVal.getDefaultValue(type);
-				}
-			}
-			return value;
-		} else {
-			Constructor<?> constructor = type.getDeclaredConstructor();
-			constructor.setAccessible(true);
-			Object value = constructor.newInstance();
-			List<MethodWrapper> methods = getSetMethods(type, name);
-			for (MethodWrapper mw : methods) {
-				// String paramName = mw.paramName;
-				Method method = mw.method;
-//				String param = webRequest.getParameter(paramName);
-				String param = getParam(mw, params, webRequest);
-				Params fparams = mw.params; // 字段的参数注解.
-				Class<?> ftype = method.getParameterTypes()[0];
-				Object fvalue = parse(param, ftype);
-				if (fvalue == null) {
-					if (fparams == null) {
-						// fvalue = DefaultVal.getDefaultValue(ftype);
-					} else if (!ValueConstants.DEFAULT_NONE.equals(fparams.defaultValue())) {
-						fvalue = parse(fparams.defaultValue(), ftype);
-					} else if (fparams.required()) { //
-						throw new MissingServletRequestParameterException(mw.paramName, ftype.getSimpleName());
-					} else {
-						// fvalue = DefaultVal.getDefaultValue(ftype);
-					}
-				}
-				if (fvalue != null) {
-					method.invoke(value, fvalue);
-				}
-				
-			}
-
-			return value;
+		Params params = getParams(parameter);
+		if (isSimpleType(type)) {
+			String name = resolveParamName(parameter, params);
+			return resolveSimpleFormValue(name, type, params, webRequest);
 		}
+		return resolveFormBean(type, beanPrefix(params), params, webRequest);
 	}
-	
-	private String bodyAuthDecipher(Params fparams, NativeWebRequest webRequest,  String body) throws Exception {
-		if (fparams.authEncrypt() == ParamsAuthEncrypt.NONE) {
+
+	private boolean shouldUseJsonResolver(Params params, NativeWebRequest webRequest) throws Exception {
+		if (params.scope() == ParamsScope.HEADER || params.scope() == ParamsScope.COOKIE) {
+			return false;
+		}
+		HttpServletRequest request = webRequest.getNativeRequest(HttpServletRequest.class);
+		if (request == null) {
+			return false;
+		}
+		String method = request.getMethod();
+		if ("GET".equalsIgnoreCase(method)) {
+			return false;
+		}
+		if (!supportsRequestBody(method)) {
+			return false;
+		}
+		if (params.authEncrypt() != ParamsAuthEncrypt.NONE) {
+			return true;
+		}
+		if (StringUtils.isNotBlank(webRequest.getHeader(HEADER_BODY_AUTH_NAME))) {
+			return true;
+		}
+		String contentType = webRequest.getHeader(HEADER_CONTENT_TYPE);
+		if (contentType != null && contentType.startsWith("application/json")) {
+			return true;
+		}
+		if (isFormContentType(contentType)) {
+			return false;
+		}
+		return looksLikeJsonBody(webRequest);
+	}
+
+	private boolean supportsRequestBody(String method) {
+		return "POST".equalsIgnoreCase(method)
+				|| "PUT".equalsIgnoreCase(method)
+				|| "PATCH".equalsIgnoreCase(method)
+				|| "DELETE".equalsIgnoreCase(method);
+	}
+
+	private JSONObject getRequestJsonBody(NativeWebRequest webRequest, Params params) throws Exception {
+		JSONObject jsonObject = (JSONObject) webRequest.getAttribute(CURRENT_BODY_ATTR, RequestAttributes.SCOPE_REQUEST);
+		if (jsonObject != null) {
+			return jsonObject;
+		}
+		jsonObject = new JSONObject();
+		String body = getRequestBody(webRequest);
+		if (StringUtils.isNotBlank(body)) {
+			body = bodyAuthDecipher(params, webRequest, body);
+			if (body.startsWith("{") && body.endsWith("}")) {
+				jsonObject = JSONObject.parseObject(body);
+			}
+		}
+		webRequest.setAttribute(CURRENT_BODY_ATTR, jsonObject, RequestAttributes.SCOPE_REQUEST);
+		return jsonObject;
+	}
+
+	private String getRequestBody(NativeWebRequest webRequest) throws Exception {
+		String body = (String) webRequest.getAttribute(CURRENT_BODY_TEXT_ATTR, RequestAttributes.SCOPE_REQUEST);
+		if (body != null) {
 			return body;
 		}
-		
-		ParamsAuthEncrypt authEncrypt = fparams.authEncrypt();
-		String headerAuthEncrypt = webRequest.getHeader("body-auth-encrypt"); // 加密方式
-		if (StringUtils.isNotBlank(headerAuthEncrypt)) {
-			if ("AES".equalsIgnoreCase(headerAuthEncrypt)) {
-				authEncrypt = ParamsAuthEncrypt.AES;
-			} else if ("RSA".equalsIgnoreCase(headerAuthEncrypt)) {
-				authEncrypt = ParamsAuthEncrypt.RSA;
-			}
+		HttpServletRequest request = webRequest.getNativeRequest(HttpServletRequest.class);
+		if (request == null) {
+			return null;
 		}
-		if (authEncrypt == ParamsAuthEncrypt.AES) {
-			ParamAuth auth = getParamAuth(fparams, authEncrypt, webRequest);
-			Charset charset = Charset.forName(fparams.authEncryptCharset());
-			String password = auth.getPassword();
-			// 权限验证失败.
-			if (auth == null || StringUtils.isBlank(password)) {
-				ResponseStatus.AUTH_VERIFY_FAIL.throwResEx();
-			}
-			byte[] data = auth.decodeBody(body, charset);
-			byte[] bodyBytes = CodecUtils.AES.decrypt(data, password);
-			body = new String(bodyBytes, charset);
-		} else if (authEncrypt == ParamsAuthEncrypt.BASE64) {
-			Charset charset = Charset.forName(fparams.authEncryptCharset());
-			byte[] bodyBytes = Base64.getDecoder().decode(body.getBytes(charset));
-			body = new String(bodyBytes, charset);
-		} else if (authEncrypt == ParamsAuthEncrypt.RSA) {
-			ParamAuth auth = getParamAuth(fparams, authEncrypt, webRequest);
-			Charset charset = Charset.forName(fparams.authEncryptCharset());
-			String password = auth.getPassword();
-			// 权限验证失败.
-			if (auth == null || StringUtils.isBlank(password)) {
-				ResponseStatus.AUTH_VERIFY_FAIL.throwResEx();
-			}
-			byte[] data = auth.decodeBody(body, charset);
-			PrivateKey privateKey = RSAUtil.getPrivateKey(password);
-			byte[] bodyBytes = RSAUtil.decrypt(data, privateKey);
-			body = new String(bodyBytes, charset);
+		body = readRequestBody(request);
+		if (body != null) {
+			webRequest.setAttribute(CURRENT_BODY_TEXT_ATTR, body, RequestAttributes.SCOPE_REQUEST);
 		}
 		return body;
 	}
-	
-	private String getParam(MethodWrapper mw, Params parentParams,NativeWebRequest webRequest) {
-		Params fparams = mw.params;
-		String paramName = mw.paramName;
-		if (parentParams.scope() == ParamsScope.HEADER || parentParams.scope() == ParamsScope.COOKIE) {
-			fparams = parentParams;
-		}
-		fparams = fparams == null ? parentParams : fparams;
-		return getParam(paramName, fparams, webRequest);
-	}
-	
-	private String getParam(String paramName, Params fparams, NativeWebRequest webRequest) {
-		String value = null;
-		ParamsScope scope = ParamsScope.PARAM;
-		if (fparams != null && fparams.scope() != ParamsScope.NONE) {
-			 scope = fparams.scope();
-		}
-		
-		if (scope == ParamsScope.PARAM) {
-			value = CustomRequestParameter.getOrCreate(webRequest).getParameter(paramName);
-//			value = webRequest.getParameter(paramName);
-		} else if (scope == ParamsScope.HEADER) {
-			value = webRequest.getHeader(paramName);
-		} else if (scope == ParamsScope.COOKIE) {
-			Cookie[] cookies = webRequest.getNativeRequest(HttpServletRequest.class).getCookies();
 
-			if (cookies != null) {
-				for (Cookie cookie : cookies) {
-					if (paramName.equals(cookie.getName())) {
-						value = cookie.getValue();
-						break;
-					}
+	private String readRequestBody(HttpServletRequest request) throws Exception {
+		try (InputStream in = request.getInputStream()) {
+			byte[] data = in.readAllBytes();
+			if (data.length == 0) {
+				return null;
+			}
+			return new String(data, StandardCharsets.UTF_8).trim();
+		}
+	}
+
+	private boolean looksLikeJsonBody(NativeWebRequest webRequest) throws Exception {
+		String body = getRequestBody(webRequest);
+		return StringUtils.isNotBlank(body) && body.startsWith("{") && body.endsWith("}");
+	}
+
+	private boolean isFormContentType(String contentType) {
+		return contentType != null && (contentType.startsWith("application/x-www-form-urlencoded")
+				|| contentType.startsWith("multipart/form-data"));
+	}
+
+	private Object resolveSimpleJsonValue(MethodParameter parameter, Params params, NativeWebRequest webRequest,
+			JSONObject jsonObject) throws MissingServletRequestParameterException {
+		Class<?> type = parameter.getParameterType();
+		String name = resolveParamName(parameter, params);
+		Object value = null;
+		if (params.scope() != ParamsScope.PARAM && params.scope() != ParamsScope.NONE) {
+			value = parse(getParam(name, params, webRequest), type);
+		} else {
+			value = getJson(name, jsonObject, type);
+		}
+		if (value == null) {
+			value = parse(getParam(name, params, webRequest), type);
+		}
+		return applyDefaultValue(name, type, params, value);
+	}
+
+	private Object resolveSimpleFormValue(String name, Class<?> type, Params params, NativeWebRequest webRequest)
+			throws MissingServletRequestParameterException {
+		Object value = parse(getParam(name, params, webRequest), type);
+		return applyDefaultValue(name, type, params, value);
+	}
+
+	private Object resolveJsonBean(Class<?> type, Params params, NativeWebRequest webRequest, JSONObject jsonObject)
+			throws Exception {
+		Object result = jsonObject.toJavaObject(type);
+		if (result == null) {
+			result = createInstance(type);
+		}
+		List<MethodWrapper> methods = getSetMethods(type, beanPrefix(params));
+		for (MethodWrapper wrapper : methods) {
+			Object fieldValue = parse(getParam(wrapper, params, webRequest), wrapper.getType());
+			if (fieldValue != null) {
+				invokeMethod(wrapper.method, result, fieldValue);
+				continue;
+			}
+			if (wrapper.hasValue(result)) {
+				continue;
+			}
+			if (wrapper.params != null) {
+				fieldValue = resolveFieldDefaultValue(wrapper);
+				if (fieldValue != null) {
+					invokeMethod(wrapper.method, result, fieldValue);
+					continue;
 				}
 			}
-		} else {
-			value = webRequest.getParameter(paramName);
+			if (params.required() && wrapper.params != null && !wrapper.hasValue(result)) {
+				throw new MissingServletRequestParameterException(wrapper.paramName, wrapper.getType().getSimpleName());
+			}
+		}
+		return result;
+	}
+
+	private Object resolveFormBean(Class<?> type, String prefix, Params params, NativeWebRequest webRequest)
+			throws Exception {
+		Object value = createInstance(type);
+		List<MethodWrapper> methods = getSetMethods(type, prefix);
+		for (MethodWrapper wrapper : methods) {
+			Object fieldValue = parse(getParam(wrapper, params, webRequest), wrapper.getType());
+			if (fieldValue == null) {
+				fieldValue = resolveFieldDefaultValue(wrapper);
+			}
+			if (fieldValue != null) {
+				invokeMethod(wrapper.method, value, fieldValue);
+			}
 		}
 		return value;
 	}
 
-	private List<MethodWrapper> getSetParamMethods(Class<?> type, String prefix) {
-		List<MethodWrapper> methods = setParamMethodCaches.get(type);
-		if (methods == null) {
-			methods = new ArrayList<>();
-			List<MethodWrapper> list = getSetMethods(type, prefix);
-			for (MethodWrapper methodWrapper : list) {
-				if (methodWrapper.params != null) {
-					methods.add(methodWrapper);
-				}
-			}
-			setParamMethodCaches.put(type, methods);
+	private Object resolveFieldDefaultValue(MethodWrapper wrapper) throws MissingServletRequestParameterException {
+		Params params = wrapper.params;
+		if (params == null) {
+			return null;
 		}
-		return methods;
-		
+		Class<?> type = wrapper.getType();
+		if (!ValueConstants.DEFAULT_NONE.equals(params.defaultValue())) {
+			return parse(params.defaultValue(), type);
+		}
+		if (params.required()) {
+			throw new MissingServletRequestParameterException(wrapper.paramName, type.getSimpleName());
+		}
+		return null;
 	}
-	private List<MethodWrapper> getSetMethods(Class<?> type, String prefix) {
-		List<MethodWrapper> methods = setMethodCaches.get(type);
-		if (methods == null) {
-			methods = new ArrayList<MethodWrapper>();
-			Set<String> set = new HashSet<String>();
-			Class<?> targetType = type;
-			Map<String, Field> fieldMap = new HashMap<>();
-			while (targetType != null && targetType != Object.class) {
-				Field fields[] = targetType.getDeclaredFields();
-				for (Field field : fields) {
-					fieldMap.putIfAbsent(field.getName(), field);
-				}
-				targetType = targetType.getSuperclass();
-			}
-			targetType = type;
-			while (targetType != null && targetType != Object.class) {
-				Method[] ms = targetType.getDeclaredMethods();
-				for (Method method : ms) {
-					int mod = method.getModifiers();
-					if (Modifier.isPublic(mod) && !Modifier.isAbstract(mod) && method.getName().startsWith("set")
-							&& method.getParameterCount() == 1) {
-						if (set.add(method.getName())) {
-							String paramName = method.getName().substring(3, 4).toLowerCase() + method.getName().substring(4);
-							if (prefix != null && StringUtils.isNotBlank(prefix)) {
-								paramName = prefix + "." + paramName;
-							}
-							Params params = null;
-							Field field = fieldMap.get(paramName);
-							if (field != null) {
-								params = AnnotatedElementUtils.getMergedAnnotation(field, Params.class);
-								if (params != null && StringUtils.isNotBlank(params.name())) {
-									paramName = params.name();
-								}
-							}
-							methods.add(new MethodWrapper(field, method, paramName, params));
+
+	private Object applyDefaultValue(String name, Class<?> type, Params params, Object value)
+			throws MissingServletRequestParameterException {
+		if (value != null) {
+			return value;
+		}
+		if (!ValueConstants.DEFAULT_NONE.equals(params.defaultValue())) {
+			return parse(params.defaultValue(), type);
+		}
+		if (params.required()) {
+			throw new MissingServletRequestParameterException(name, type.getSimpleName());
+		}
+		return DefaultVal.getDefaultValue(type);
+	}
+
+	private String bodyAuthDecipher(Params params, NativeWebRequest webRequest, String body) throws Exception {
+		ParamsAuthEncrypt authEncrypt = resolveAuthEncrypt(params, webRequest.getHeader(HEADER_BODY_AUTH_ENCRYPT));
+		if (authEncrypt == ParamsAuthEncrypt.NONE) {
+			return body;
+		}
+		Charset charset = Charset.forName(params.authEncryptCharset());
+		if (authEncrypt == ParamsAuthEncrypt.BASE64) {
+			byte[] bodyBytes = Base64.getDecoder().decode(body.getBytes(charset));
+			return new String(bodyBytes, charset);
+		}
+		ParamAuth auth = getParamAuth(params, authEncrypt, webRequest);
+		String password = auth.getPassword();
+		if (StringUtils.isBlank(password)) {
+			ResponseStatus.AUTH_VERIFY_FAIL.throwResEx();
+		}
+		byte[] data = auth.decodeBody(body, charset);
+		if (authEncrypt == ParamsAuthEncrypt.AES) {
+			byte[] bodyBytes = CodecUtils.AES.decrypt(data, password);
+			return new String(bodyBytes, charset);
+		}
+		PrivateKey privateKey = RSAUtil.getPrivateKey(password);
+		byte[] bodyBytes = RSAUtil.decrypt(data, privateKey);
+		return new String(bodyBytes, charset);
+	}
+
+	private ParamsAuthEncrypt resolveAuthEncrypt(Params params, String headerAuthEncrypt) {
+		if (StringUtils.isBlank(headerAuthEncrypt)) {
+			return params.authEncrypt();
+		}
+		if ("AES".equalsIgnoreCase(headerAuthEncrypt)) {
+			return ParamsAuthEncrypt.AES;
+		}
+		if ("RSA".equalsIgnoreCase(headerAuthEncrypt)) {
+			return ParamsAuthEncrypt.RSA;
+		}
+		if ("BASE64".equalsIgnoreCase(headerAuthEncrypt)) {
+			return ParamsAuthEncrypt.BASE64;
+		}
+		return params.authEncrypt();
+	}
+
+	private String getParam(MethodWrapper wrapper, Params parentParams, NativeWebRequest webRequest) {
+		Params params = wrapper.params;
+		if (parentParams.scope() == ParamsScope.HEADER || parentParams.scope() == ParamsScope.COOKIE) {
+			params = parentParams;
+		}
+		if (params == null) {
+			params = parentParams;
+		}
+		return getParam(wrapper.paramName, params, webRequest);
+	}
+
+	private String getParam(String paramName, Params params, NativeWebRequest webRequest) {
+		ParamsScope scope = params == null ? ParamsScope.PARAM : params.scope();
+		if (scope == ParamsScope.NONE) {
+			return webRequest.getParameter(paramName);
+		}
+		if (scope == ParamsScope.PARAM) {
+			return CustomRequestParameter.getOrCreate(webRequest).getParameter(paramName);
+		}
+		if (scope == ParamsScope.HEADER) {
+			return webRequest.getHeader(paramName);
+		}
+		if (scope == ParamsScope.COOKIE) {
+			HttpServletRequest request = webRequest.getNativeRequest(HttpServletRequest.class);
+			if (request != null) {
+				Cookie[] cookies = request.getCookies();
+				if (cookies != null) {
+					for (Cookie cookie : cookies) {
+						if (paramName.equals(cookie.getName())) {
+							return cookie.getValue();
 						}
 					}
 				}
-				targetType = targetType.getSuperclass();
 			}
-			setMethodCaches.put(type, methods);
+			return null;
+		}
+		return webRequest.getParameter(paramName);
+	}
+
+	private void invokeMethod(Method method, Object target, Object value) throws Exception {
+		if (!method.canAccess(target)) {
+			method.setAccessible(true);
+		}
+		method.invoke(target, value);
+	}
+
+	private List<MethodWrapper> getSetMethods(Class<?> type, String prefix) {
+		String cacheKey = buildMethodCacheKey(type, prefix);
+		return setMethodCaches.computeIfAbsent(cacheKey, key -> List.copyOf(buildSetMethods(type, prefix)));
+	}
+
+	private List<MethodWrapper> buildSetMethods(Class<?> type, String prefix) {
+		List<MethodWrapper> methods = new ArrayList<>();
+		Set<String> set = new HashSet<>();
+		Map<String, Field> fieldMap = new HashMap<>();
+		Class<?> targetType = type;
+		while (targetType != null && targetType != Object.class) {
+			Field[] fields = targetType.getDeclaredFields();
+			for (Field field : fields) {
+				fieldMap.putIfAbsent(field.getName(), field);
+			}
+			targetType = targetType.getSuperclass();
+		}
+		targetType = type;
+		while (targetType != null && targetType != Object.class) {
+			Method[] declaredMethods = targetType.getDeclaredMethods();
+			for (Method method : declaredMethods) {
+				int mod = method.getModifiers();
+				if (!Modifier.isPublic(mod) || Modifier.isAbstract(mod) || !method.getName().startsWith("set")
+						|| method.getParameterCount() != 1 || !set.add(method.getName())) {
+					continue;
+				}
+				String fieldName = method.getName().substring(3, 4).toLowerCase() + method.getName().substring(4);
+				String paramName = fieldName;
+				if (StringUtils.isNotBlank(prefix)) {
+					paramName = prefix + "." + fieldName;
+				}
+				Field field = fieldMap.get(fieldName);
+				Params params = null;
+				if (field != null) {
+					params = AnnotatedElementUtils.getMergedAnnotation(field, Params.class);
+					if (params != null && StringUtils.isNotBlank(params.name())) {
+						paramName = params.name();
+					}
+				}
+				methods.add(new MethodWrapper(field, method, paramName, params));
+			}
+			targetType = targetType.getSuperclass();
 		}
 		return methods;
+	}
+
+	private String buildMethodCacheKey(Class<?> type, String prefix) {
+		return type.getName() + "#" + StringUtils.defaultString(prefix);
+	}
+
+	private String beanPrefix(Params params) {
+		return params == null ? null : params.name();
 	}
 
 	private Object parse(String value, Class<?> type) {
@@ -397,20 +441,15 @@ public class RequestParamInjector implements HandlerMethodArgumentResolver, Envi
 		if (type == long.class || type == Long.class) {
 			return NumberUtils.toLong(value);
 		}
-
 		if (type == byte.class || type == Byte.class) {
-
 			return (byte) NumberUtils.toInt(value);
 		}
 		if (type == short.class || type == Short.class) {
-
 			return (short) NumberUtils.toInt(value);
 		}
-
 		if (type == float.class || type == Float.class) {
 			return (float) NumberUtils.toDouble(value);
 		}
-
 		if (type == double.class || type == Double.class) {
 			return NumberUtils.toDouble(value);
 		}
@@ -432,151 +471,145 @@ public class RequestParamInjector implements HandlerMethodArgumentResolver, Envi
 		if (type == BigDecimal.class) {
 			return new BigDecimal(value);
 		}
-
 		return DefaultVal.getDefaultValue(type);
 	}
 
 	private Object getJson(String name, JSONObject jsonObject, Class<?> type) {
-		if (jsonObject == null) {
+		if (jsonObject == null || StringUtils.isBlank(name)) {
 			return null;
 		}
-		int startIndex = 0;
-		String nodeName = null;
+		String[] parts = StringUtils.split(name, '.');
+		if (parts == null || parts.length == 0) {
+			return null;
+		}
 		JSONObject node = jsonObject;
-		for (int i = 0; i < name.length() && node != null; i++) {
-			char c = name.charAt(i);
-			if (c == '.') {
-				nodeName = name.substring(startIndex, i);
-				startIndex = i + 1;
-				node = jsonObject.getJSONObject(nodeName);
+		for (int i = 0; i < parts.length - 1; i++) {
+			Object child = node.get(parts[i]);
+			if (!(child instanceof JSONObject)) {
+				return null;
 			}
+			node = (JSONObject) child;
 		}
-		if (node == null) {
+		String nodeName = parts[parts.length - 1];
+		if (!node.containsKey(nodeName)) {
 			return null;
 		}
-		if (nodeName == null) {
-			nodeName = name;
-		} else {
-			nodeName = name.substring(startIndex);
-		}
-		if (!jsonObject.containsKey(nodeName)) {
-			return null;
-		}
-
 		if (type == int.class || type == Integer.class) {
-			return jsonObject.getInteger(nodeName);
+			return node.getInteger(nodeName);
 		}
 		if (type == long.class || type == Long.class) {
-			return jsonObject.getLong(nodeName);
+			return node.getLong(nodeName);
 		}
-
 		if (type == byte.class || type == Byte.class) {
-
-			return jsonObject.getByte(nodeName);
+			return node.getByte(nodeName);
 		}
 		if (type == short.class || type == Short.class) {
-
-			return jsonObject.getByte(nodeName);
+			return node.getShort(nodeName);
 		}
-
 		if (type == float.class || type == Float.class) {
-			return jsonObject.getFloat(nodeName);
+			return node.getFloat(nodeName);
 		}
-
 		if (type == double.class || type == Double.class) {
-			return jsonObject.getDouble(nodeName);
+			return node.getDouble(nodeName);
 		}
 		if (type == boolean.class || type == Boolean.class) {
-			return jsonObject.getBoolean(nodeName);
+			return node.getBoolean(nodeName);
 		}
 		if (type == String.class) {
-			return jsonObject.getString(nodeName);
+			return node.getString(nodeName);
 		}
 		if (type == Date.class) {
-			return jsonObject.getDate(nodeName);
+			return node.getDate(nodeName);
 		}
 		if (type == BigDecimal.class) {
-			return jsonObject.getBigDecimal(nodeName);
+			return node.getBigDecimal(nodeName);
 		}
-
-		return jsonObject.get(nodeName);
+		return node.get(nodeName);
 	}
+
+	private ParamAuth getParamAuth(Params params, ParamsAuthEncrypt authEncrypt, NativeWebRequest webRequest) {
+		String authName = webRequest.getHeader(HEADER_BODY_AUTH_NAME);
+		if (StringUtils.isBlank(authName)) {
+			authName = params.authName();
+		}
+		String envName = "ns.params.auth." + authName + "." + authEncrypt.name().toLowerCase();
+		String password = authPasswordCache.computeIfAbsent(buildAuthCacheKey(authEncrypt, authName),
+				key -> environment == null ? null : environment.getProperty(envName + ".password"));
+		String decode = webRequest.getHeader(HEADER_BODY_AUTH_DECODE);
+		if (StringUtils.isBlank(decode) && environment != null) {
+			decode = environment.getProperty(envName + ".decode", "base64");
+		}
+		if (StringUtils.isBlank(decode)) {
+			decode = "base64";
+		}
+		ParamAuth paramAuth = new ParamAuth();
+		paramAuth.setDecode(decode);
+		paramAuth.setPassword(password);
+		paramAuth.setCharset(Charset.forName(params.authEncryptCharset()));
+		return paramAuth;
+	}
+
+	private String buildAuthCacheKey(ParamsAuthEncrypt authEncrypt, String authName) {
+		return authEncrypt.name() + "-" + authName;
+	}
+
+	private boolean isSimpleType(Class<?> type) {
+		return DefaultVal.getConvertType(type) != null;
+	}
+
+	private Params getParams(MethodParameter parameter) {
+		return AnnotatedElementUtils.getMergedAnnotation(parameter.getParameter(), Params.class);
+	}
+
+	private String resolveParamName(MethodParameter parameter, Params params) {
+		if (StringUtils.isNotBlank(params.name())) {
+			return params.name();
+		}
+		String parameterName = parameter.getParameterName();
+		if (StringUtils.isNotBlank(parameterName)) {
+			return parameterName;
+		}
+		return parameter.getParameter().getName();
+	}
+
+	private Object createInstance(Class<?> type) throws Exception {
+		Constructor<?> constructor = type.getDeclaredConstructor();
+		constructor.setAccessible(true);
+		return constructor.newInstance();
+	}
+
 	private static class MethodWrapper {
 		private final Field field;
 		private final Method method;
 		private final String paramName;
 		private final Params params;
-		public MethodWrapper(Field field, Method method, String paramName, Params params) {
-			super();
+
+		private MethodWrapper(Field field, Method method, String paramName, Params params) {
 			this.field = field;
 			this.method = method;
 			this.paramName = paramName;
 			this.params = params;
-			
 		}
-		public <T extends Annotation> T getAnnotation(Class<T> type) {
-			T ann = null;
-			if (field != null) {
-				ann = field.getAnnotation(type);
-			}
-			
-			if (ann == null) {
-				ann = method.getAnnotation(type);
-			}
-			return ann;
-		}
-		
-		public Class<?> getType() {
+
+		private Class<?> getType() {
 			if (field != null) {
 				return field.getType();
 			}
 			return method.getParameterTypes()[0];
 		}
-		
-		public boolean hasValue(Object result) {
+
+		private boolean hasValue(Object result) {
 			if (field == null) {
 				return false;
 			}
-			if (!field.isAccessible()) {
-				field.setAccessible(true);
-			}
 			try {
+				if (!field.canAccess(result)) {
+					field.setAccessible(true);
+				}
 				return field.get(result) != null;
 			} catch (Exception e) {
 				return false;
 			}
 		}
-	}
-	
-	/**
-	 * 参数鉴权
-	 * @param fparams
-	 * @param webRequest
-	 * @return
-	 */
-	private ParamAuth getParamAuth(Params fparams, ParamsAuthEncrypt authEncrypt, NativeWebRequest webRequest) {
-		// 授权名字
-		String authName = webRequest.getHeader("body-auth-name");
-		if (StringUtils.isBlank(authName)) {
-			authName = fparams.authName();
-		}
-		String key = authEncrypt.name() + "-" + authName;
-		ParamAuth paramAuth = authMap.get(key);
-		if (paramAuth == null) {
-			String decode = webRequest.getHeader("body-auth-decode");
-			Charset charset = Charset.forName(fparams.authEncryptCharset());
-			String evnName = "ns.params.auth." + authName + "." + authEncrypt.name().toLowerCase();
-			String password = environment.getProperty(evnName + ".password");
-			if (StringUtils.isBlank(decode)) {
-				decode = environment.getProperty(evnName + ".decode", "base64");
-			}
-			paramAuth = new ParamAuth();
-			paramAuth.setDecode(decode);
-			paramAuth.setPassword(password);
-			paramAuth.setCharset(charset);
-			authMap.put(key, paramAuth);
-
-		}
-		return paramAuth;
 	}
 }

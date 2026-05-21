@@ -22,6 +22,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.method.support.HandlerMethodArgumentResolver;
 import org.springframework.web.method.support.HandlerMethodReturnValueHandler;
+import org.springframework.web.filter.FormContentFilter;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerAdapter;
@@ -81,6 +82,13 @@ public class WebMvcConfiguration implements WebMvcConfigurer, SmartInitializingS
     RequestParamInjector requestParamInjector() {
     	return new RequestParamInjector();
     }
+
+    @Bean
+    @ConditionalOnMissingBean
+    FormContentFilter formContentFilter() {
+        return new FormContentFilter();
+    }
+
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(requestInterceptor()).order(-1);

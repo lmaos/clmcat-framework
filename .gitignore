@@ -11,3 +11,6 @@
 **/.project
 **/.classpath
 **/.settings/
+
+.github/
+**/.github/
