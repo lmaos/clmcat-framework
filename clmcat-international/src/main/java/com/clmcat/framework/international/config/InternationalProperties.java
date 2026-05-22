@@ -11,7 +11,7 @@ import java.util.List;
 @Setter
 public class InternationalProperties {
     /// 默认处理, 选择。 默认为 Excel.xlsx
-    private String mode = "Excel.xlsx";
+    private String mode = "excel.xlsx";
     /// 默认大区
     private String defaultLocale ;
 

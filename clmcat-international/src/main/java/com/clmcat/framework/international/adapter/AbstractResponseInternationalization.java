@@ -30,7 +30,7 @@ public abstract class AbstractResponseInternationalization implements ResponseIn
         Locale locale = message.getLocale();
         Object[] messageArgs = message.getMessageArgs();
         if (StringUtils.isNotBlank(key)) {
-            String value = localeMessageMap.get(key, locale, messageArgs);
+            String value = localeMessageMap.get(key, locale);
             if (StringUtils.isNotBlank(value)) {
                 return format.format(value, messageArgs);
             }
@@ -51,14 +51,15 @@ public abstract class AbstractResponseInternationalization implements ResponseIn
         if (properties != null && StringUtils.isNotBlank(properties.getFormatParam())) {
             format = new HighValueFormat(properties.getFormatParam());
         }
-        LocalLocalMessageMap localeMessageMapTmp = new LocalLocalMessageMap();
+        LocaleMessageMap localeMessageMapTmp = new LocalLocalMessageMap();
+        localeMessageMapTmp.setDefaultLocale(getDefaultLocale());
         if (doLoad(localeMessageMapTmp)) {
             this.localeMessageMap = localeMessageMapTmp;
         }
 
     }
 
-    protected abstract boolean doLoad(LocalLocalMessageMap localeMessageMapTmp) ;
+    protected abstract boolean doLoad(LocaleMessageMap localeMessageMapTmp) ;
 
     @Override
     public void afterPropertiesSet() throws Exception {

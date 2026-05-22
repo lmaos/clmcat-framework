@@ -3,28 +3,25 @@ package com.clmcat.framework.international.config;
 import com.clmcat.framework.international.adapter.ExcelXlsxResponseInternational;
 import com.clmcat.framework.international.adapter.JsonSourceResponseInternational;
 import com.clmcat.framework.webmvc.ResponseInternationalization;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 @Configuration
+@EnableConfigurationProperties(InternationalProperties.class)
 public class InternationalConfiguration {
     @Bean
-    InternationalProperties InternationalProperties() {
-        return new InternationalProperties();
-    }
-
-    @Bean
     @ConditionalOnMissingBean
-    ResponseInternationalization responseInternationalization() {
-        InternationalProperties properties = InternationalProperties();
-        String mode = properties.getMode();
-        if ("Excel.xlsx".equalsIgnoreCase(mode)) {
-            return new ExcelXlsxResponseInternational();
-        } else if ("Json.source".equalsIgnoreCase(mode)) {
+    public ResponseInternationalization responseInternationalization(InternationalProperties properties) {
+        String mode = StringUtils.defaultIfBlank(properties.getMode(), "excel.xlsx");
+        if ("json.source".equalsIgnoreCase(mode)) {
             return new JsonSourceResponseInternational();
-        } else {
-            return null;
         }
+        if ("excel.xlsx".equalsIgnoreCase(mode)) {
+            return new ExcelXlsxResponseInternational();
+        }
+        return new ExcelXlsxResponseInternational();
     }
 }

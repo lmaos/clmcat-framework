@@ -3,12 +3,13 @@ package com.clmcat.framework.international.adapter;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import lombok.extern.slf4j.Slf4j;
+import com.clmcat.framework.international.localemap.LocaleMessageMap;
+import com.clmcat.framework.international.localemap.LocaleMessageUtils;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.StringUtils;
 import com.clmcat.basics.commons.https.HttpUtils;
 import com.clmcat.basics.commons.https.streams.HttpStreamException;
-import com.clmcat.framework.international.localemap.LocalLocalMessageMap;
 
 import java.io.File;
 import java.io.IOException;
@@ -17,7 +18,6 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.Enumeration;
 import java.util.List;
-import java.util.Locale;
 import java.util.function.Supplier;
 
 /**
@@ -51,53 +51,61 @@ public class JsonSourceResponseInternational extends AbstractResponseInternation
 
 
     @Override
-    protected boolean doLoad(LocalLocalMessageMap localeMessageMapTmp) {
+    protected boolean doLoad(LocaleMessageMap localeMessageMapTmp) {
+        boolean loaded = false;
         if (jsonSourceSupplier != null) {
             String json = jsonSourceSupplier.get();
-            if (json == null || !json.startsWith("{") || !json.endsWith("}")) {
-                log.error("JSON格式错误, {}", json);
-                return false;
-            }
-            parseJson(json, localeMessageMapTmp);
+            loaded |= parseJson(json, localeMessageMapTmp);
         }
         if (properties != null) {
             List<String> configs = properties.getConfigs();
             if (configs != null && !configs.isEmpty()) {
                 for (String config : configs) {
-                    if (config.startsWith("http:") || config.startsWith("https:")) {
-                        parseHttpUrlJson(config, localeMessageMapTmp);
-                    } else if (config.startsWith("file:")) {
-                        parseFileJson(config, localeMessageMapTmp);
-                    }
-                    parseJson(config, localeMessageMapTmp);
+                    loaded |= loadConfig(config, localeMessageMapTmp);
                 }
             }
         }
-        return true;
+        return loaded;
     }
 
-    private void parseHttpUrlJson(String httpUrl, LocalLocalMessageMap localeMessageMapTmp) {
+    private boolean loadConfig(String config, LocaleMessageMap localeMessageMapTmp) {
+        String source = StringUtils.trimToEmpty(config);
+        if (StringUtils.isBlank(source)) {
+            return false;
+        }
+        if (source.startsWith("http:") || source.startsWith("https:")) {
+            return parseHttpUrlJson(source, localeMessageMapTmp);
+        }
+        if (source.startsWith("file:")) {
+            return parseFileJson(source, localeMessageMapTmp);
+        }
+        return parseJson(source, localeMessageMapTmp);
+    }
+
+    private boolean parseHttpUrlJson(String httpUrl, LocaleMessageMap localeMessageMapTmp) {
         // http://xxsadasd
         try {
             String json = HttpUtils.stream(httpUrl).get().request().getString("utf-8");
-            parseJson(json, localeMessageMapTmp);
+            return parseJson(json, localeMessageMapTmp);
         } catch (HttpStreamException e) {
             log.info("无法访问：{}", e.getRequestStreamResult().getUrl());
         }
+        return false;
     }
 
-    private void parseFileJson(String filePath, LocalLocalMessageMap localeMessageMapTmp) {
+    private boolean parseFileJson(String filePath, LocaleMessageMap localeMessageMapTmp) {
+        boolean loaded = false;
         filePath = filePath.substring("file:".length()).trim();
         /// classpath:
         try {
             if (filePath.startsWith("classpath:")) {
                 String classpath = filePath.substring("classpath:".length());
-                Enumeration<URL> resources = ExcelXlsxResponseInternational.class.getClassLoader().getResources(classpath);
+                Enumeration<URL> resources = getClass().getClassLoader().getResources(classpath);
                 while (resources.hasMoreElements()) {
                     URL url = resources.nextElement();
                     try (InputStream inputStream = url.openStream();) {
                         String json = IOUtils.toString(inputStream, StandardCharsets.UTF_8);
-                        parseJson(json, localeMessageMapTmp);
+                        loaded |= parseJson(json, localeMessageMapTmp);
                     } catch (Exception e) {
                         log.error("无法解析：{}: {}", filePath, url, e);
                     }
@@ -105,38 +113,52 @@ public class JsonSourceResponseInternational extends AbstractResponseInternation
 
             } else {
                 String json = FileUtils.readFileToString(new File(filePath), StandardCharsets.UTF_8);
-                parseJson(json, localeMessageMapTmp);
+                loaded |= parseJson(json, localeMessageMapTmp);
             }
         } catch (IOException e) {
             log.error("无法解析：file:{}", filePath, e);
         }
+        return loaded;
     }
 
-    private void parseJson(String json, LocalLocalMessageMap localeMessageMapTmp) {
+    private boolean parseJson(String json, LocaleMessageMap localeMessageMapTmp) {
+        String jsonText = StringUtils.trimToEmpty(json);
+        if (!jsonText.startsWith("{") || !jsonText.endsWith("}")) {
+            if (StringUtils.isNotBlank(jsonText)) {
+                log.error("JSON格式错误, {}", jsonText);
+            }
+            return false;
+        }
         // {"key": {"zh,zh-CN":""}}
-        JSONObject jsonObject = JSON.parseObject(json);
-        jsonObject.forEach((key, localeObject) -> {
-            if (localeObject instanceof JSONObject valueObject) {
-                valueObject.forEach((localeKey, message) -> {
-                    /// {"zh,zh-CN":""}, key = zh,zh-CN
-                    String[] split = localeKey.split(",");
-                    for (String localeStr : split) {
-                        localeStr = localeStr.trim();
-                        String value = message.toString();
-                        if (StringUtils.isNotBlank(localeStr) && StringUtils.isNotBlank(value)) {
-                            Locale locale = Locale.forLanguageTag(localeStr);
+        try {
+            JSONObject jsonObject = JSON.parseObject(jsonText);
+            if (jsonObject == null || jsonObject.isEmpty()) {
+                return false;
+            }
+            jsonObject.forEach((key, localeObject) -> {
+                if (localeObject instanceof JSONObject valueObject) {
+                    valueObject.forEach((localeKey, message) -> {
+                        String value = message == null ? null : message.toString();
+                        if (StringUtils.isBlank(value)) {
+                            return;
+                        }
+                        for (var locale : LocaleMessageUtils.parseLocaleExpression(localeKey)) {
                             localeMessageMapTmp.put(key, locale, value);
                         }
-                    }
-                });
-            }
-        });
+                    });
+                }
+            });
+            return true;
+        } catch (Exception e) {
+            log.error("无法解析JSON", e);
+            return false;
+        }
     }
     /// 默认JSON源实现
     private String defaultJsonSource() {
         try {
             JSONObject defaultJsonObject = new JSONObject();
-            Enumeration<URL> resources = ExcelXlsxResponseInternational.class.getClassLoader().getResources(DEFAULT_FILE_NAME);
+            Enumeration<URL> resources = getClass().getClassLoader().getResources(DEFAULT_FILE_NAME);
             while (resources.hasMoreElements()) {
                 URL url = resources.nextElement();
                 try (InputStream inputStream = url.openStream();) {
