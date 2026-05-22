@@ -12,7 +12,7 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 import java.util.List;
 
 /**
- * ark.webmvc.protobuf=true
+ * clmcat.webmvc.protobuf=true
  */
 @Configuration
 public class ProtobufAutoConfiguration implements WebMvcConfigurer {
@@ -29,7 +29,7 @@ public class ProtobufAutoConfiguration implements WebMvcConfigurer {
 
     @Bean
     @ConditionalOnMissingBean
-    @ConditionalOnProperty(prefix = "ark.webmvc.protobuf", name = "enable", havingValue = "true")
+    @ConditionalOnProperty(prefix = "clmcat.webmvc.protobuf", name = "enable", havingValue = "true")
     public ProtobufResponseAdapter globalResultAdapter() {
         return new ProtobufResponseAdapter();
     }

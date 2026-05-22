@@ -4,7 +4,7 @@ import lombok.Getter;
 import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
-@ConfigurationProperties(prefix = "ark.webmvc.protobuf")
+@ConfigurationProperties(prefix = "clmcat.webmvc.protobuf")
 @Getter
 @Setter
 public class ProtobufResponseProperties {
