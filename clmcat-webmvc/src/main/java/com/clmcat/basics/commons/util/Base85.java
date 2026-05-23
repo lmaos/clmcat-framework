@@ -1,5 +1,6 @@
 package com.clmcat.basics.commons.util;
 
+import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 
 /**
@@ -8,26 +9,27 @@ import java.nio.ByteBuffer;
  * Base85编码解码工具类
  */
 public class Base85 {
-    // Ascii85字符表（RFC 1924）
+    // Adobe ASCII85字符表：'!'(33) 到 'u'(117)
     private static final char[] ASCII85_TABLE =
-            "!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
+            "!\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstu"
                     .toCharArray();
+    private static final int[] ASCII85_REVERSE = createReverseLookup(ASCII85_TABLE);
 
     // Z85字符表（ZeroMQ标准）
     private static final char[] Z85_TABLE =
             "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:+=^!/*?&<>()[]{}@%$#".toCharArray();
+    private static final int[] Z85_REVERSE = createReverseLookup(Z85_TABLE);
 
     // Ascii85特殊标记
     private static final String ASCII85_START = "<~";
     private static final String ASCII85_END = "~>";
     private static final char ASCII85_ZERO = 'z';
-    private static final char ASCII85_SPACE = ' ';
+    private static final int ASCII85_BASE = 85;
+    private static final long UINT32_MAX = 0xFFFFFFFFL;
 
     // Ascii85编码（含Adobe包装标记）
     public static String encodeAscii85(byte[] input) {
         StringBuilder output = new StringBuilder(ASCII85_START);
-        int padding = 0;
-
         for (int i = 0; i < input.length; i += 4) {
             long value = 0;
             int bytesToProcess = Math.min(4, input.length - i);
@@ -44,65 +46,122 @@ public class Base85 {
             for (int j = 0; j < bytesToProcess; j++) {
                 value |= (input[i + j] & 0xFFL) << (24 - j * 8);
             }
-            if (bytesToProcess < 4) {
-                padding = 4 - bytesToProcess;
-            }
 
             // 转换为85进制
             char[] chunk = new char[5];
             for (int k = 4; k >= 0; k--) {
-                chunk[k] = ASCII85_TABLE[(int)(value % 85)];
-                value /= 85;
+                chunk[k] = ASCII85_TABLE[(int) (value % ASCII85_BASE)];
+                value /= ASCII85_BASE;
             }
 
-            // 添加非全零块
-            output.append(chunk, 0, 5 - padding);
+            int outputLength = bytesToProcess < 4 ? bytesToProcess + 1 : 5;
+            output.append(chunk, 0, outputLength);
         }
         return output.append(ASCII85_END).toString();
     }
 
     // Ascii85解码
     public static byte[] decodeAscii85(String input) {
-        // 去除包装标记和空白字符
-        String trimmed = input.replace(ASCII85_START, "")
-                .replace(ASCII85_END, "")
-                .replaceAll("\\s", "");
+        if (input == null) {
+            throw new IllegalArgumentException("Ascii85输入不能为空");
+        }
+        String trimmed = input.trim();
+        boolean hasStart = trimmed.startsWith(ASCII85_START);
+        boolean hasEnd = trimmed.endsWith(ASCII85_END);
+        if (hasStart != hasEnd) {
+            throw new IllegalArgumentException("Ascii85包装标记不完整");
+        }
+        if (hasStart) {
+            trimmed = trimmed.substring(ASCII85_START.length(), trimmed.length() - ASCII85_END.length());
+        }
 
-        ByteBuffer buffer = ByteBuffer.allocate(trimmed.length() * 4 / 5);
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream(trimmed.length());
         int chunkPos = 0;
         long value = 0;
 
         for (char c : trimmed.toCharArray()) {
+            if (Character.isWhitespace(c)) {
+                continue;
+            }
             if (c == ASCII85_ZERO) {
-                buffer.put(new byte[]{0, 0, 0, 0});
+                if (chunkPos != 0) {
+                    throw new IllegalArgumentException("Ascii85字符'z'只能单独表示一个4字节零块");
+                }
+                buffer.write(0);
+                buffer.write(0);
+                buffer.write(0);
+                buffer.write(0);
                 continue;
             }
 
-            int digit = new String(ASCII85_TABLE).indexOf(c);
-            if (digit == -1) {continue;}
+            int digit = decodeAscii85Digit(c);
+            if (digit < 0) {
+                throw new IllegalArgumentException("非法Ascii85字符: " + c);
+            }
 
-            value = value * 85 + digit;
+            value = value * ASCII85_BASE + digit;
             if (++chunkPos == 5) {
-                for (int i = 0; i < 4; i++) {
-                    buffer.put((byte)((value >> (24 - i * 8)) & 0xFF));
-                }
+                writeDecodedChunk(buffer, value, 4);
                 value = 0;
                 chunkPos = 0;
             }
         }
 
         // 处理剩余部分
-        if (chunkPos > 0) {
-            value *= Math.pow(85, 5 - chunkPos);
-            for (int i = 0; i < chunkPos - 1; i++) {
-                buffer.put((byte)((value >> (24 - i * 8)) & 0xFF));
+        if (chunkPos == 1) {
+            throw new IllegalArgumentException("Ascii85尾块长度非法，至少需要2个字符");
+        }
+        if (chunkPos > 1) {
+            for (int i = chunkPos; i < 5; i++) {
+                value = value * ASCII85_BASE + (ASCII85_BASE - 1);
             }
+            writeDecodedChunk(buffer, value, chunkPos - 1);
         }
 
-        byte[] result = new byte[buffer.position()];
-        buffer.rewind();
-        buffer.get(result);
-        return result;
+        return buffer.toByteArray();
+    }
+
+    private static void writeDecodedChunk(ByteArrayOutputStream buffer, long value, int outputBytes) {
+        if (value < 0 || value > UINT32_MAX) {
+            throw new IllegalArgumentException("Ascii85编码块超出32位无符号整数范围");
+        }
+        for (int i = 0; i < outputBytes; i++) {
+            buffer.write((byte) ((value >> (24 - i * 8)) & 0xFF));
+        }
+    }
+
+    private static int decodeAscii85Digit(char c) {
+        if (c >= ASCII85_REVERSE.length) {
+            return -1;
+        }
+        return ASCII85_REVERSE[c];
+    }
+
+    private static int[] createReverseLookup(char[] table) {
+        int[] reverse = new int[128];
+        for (int i = 0; i < reverse.length; i++) {
+            reverse[i] = -1;
+        }
+        for (int i = 0; i < table.length; i++) {
+            char c = table[i];
+            if (c < reverse.length) {
+                reverse[c] = i;
+            }
+        }
+        return reverse;
+    }
+
+    private static int decodeZ85Digit(char c) {
+        if (c >= Z85_REVERSE.length) {
+            return -1;
+        }
+        return Z85_REVERSE[c];
+    }
+
+    private static void checkDecodedUint32(long value, String type) {
+        if (value < 0 || value > UINT32_MAX) {
+            throw new IllegalArgumentException(type + "编码块超出32位无符号整数范围");
+        }
     }
 
     // Z85编码（要求输入长度是4的倍数）
@@ -139,17 +198,18 @@ public class Base85 {
             long value = 0;
             for (int j = 0; j < 5; j++) {
                 char c = input.charAt(i + j);
-                int digit = new String(Z85_TABLE).indexOf(c);
+                int digit = decodeZ85Digit(c);
                 if (digit == -1) {
                     throw new IllegalArgumentException("非法Z85字符: " + c);
                 }
-                value = value * 85 + digit;
+                value = value * ASCII85_BASE + digit;
             }
+            checkDecodedUint32(value, "Z85");
 
-            buffer.put((byte)((value >> 24) & 0xFF));
-            buffer.put((byte)((value >> 16) & 0xFF));
-            buffer.put((byte)((value >> 8) & 0xFF));
-            buffer.put((byte)(value & 0xFF));
+            buffer.put((byte) ((value >> 24) & 0xFF));
+            buffer.put((byte) ((value >> 16) & 0xFF));
+            buffer.put((byte) ((value >> 8) & 0xFF));
+            buffer.put((byte) (value & 0xFF));
         }
         return buffer.array();
     }

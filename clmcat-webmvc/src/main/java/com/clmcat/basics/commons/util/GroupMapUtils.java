@@ -501,11 +501,7 @@ public class GroupMapUtils {
 	/**
 	 * 并行执行线程.
 	 */
-	static ExecutorService exec = Executors.newCachedThreadPool(run->{
-		Thread thread = new Thread(run, "group-exec");
-		thread.setDaemon(true);
-		return thread;
-	});
+	public static ExecutorService exec = ThreadExecutors.EXEC;
 	/**
 	 * LIST分区、并行执行.
 	 * <BR>

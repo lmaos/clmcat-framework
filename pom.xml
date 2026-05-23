@@ -391,7 +391,6 @@
         <module>clmcat-international</module>
         <module>clmcat-webmvc-protobuf</module>
         <module>clmcat-selectserver</module>
-        <module>clmcat-demo</module>
     </modules>
 
 </project>
