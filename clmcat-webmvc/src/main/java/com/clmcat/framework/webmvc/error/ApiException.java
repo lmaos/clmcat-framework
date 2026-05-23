@@ -186,7 +186,11 @@ public class ApiException extends RuntimeException {
                 .setContent(content)
                 .setErrplace(errplace);
     }
-    
+
+    public Integer getStatus() {
+        return status;
+    }
+
     public String getState() {
 		return state;
 	}
