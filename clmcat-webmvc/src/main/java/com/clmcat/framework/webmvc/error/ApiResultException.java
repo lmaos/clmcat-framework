@@ -4,11 +4,15 @@ import com.clmcat.framework.webmvc.ResponseErrorStatus;
 import com.clmcat.framework.webmvc.ResponseStatus.ErrorStatus;
 import com.clmcat.framework.webmvc.ResponseStatus.HttpStatusValue;
 
+import java.io.Serial;
+import java.io.Serializable;
+
 /**
  * 结果异常 status = 200
  */
-public class ApiResultException extends ApiException {
+public class ApiResultException extends ApiException implements Serializable {
 
+    @Serial
 	private static final long serialVersionUID = 1L;
 
 	public ApiResultException(ResponseErrorStatus status, String message) {

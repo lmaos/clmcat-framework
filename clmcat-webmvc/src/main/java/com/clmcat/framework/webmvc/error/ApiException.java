@@ -1,5 +1,7 @@
 package com.clmcat.framework.webmvc.error;
 
+import java.io.Serial;
+import java.io.Serializable;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -7,8 +9,9 @@ import com.clmcat.framework.webmvc.ResponseEntityBuild;
 import com.clmcat.framework.webmvc.ResponseErrorStatus;
 import com.clmcat.framework.webmvc.ResponseStatus.ErrorStatus;
 
-public class ApiException extends RuntimeException {
+public class ApiException extends RuntimeException implements Serializable {
 
+    @Serial
 	private static final long serialVersionUID = 1L;
 
 	private int httpStatus = 200;
