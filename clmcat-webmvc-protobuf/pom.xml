@@ -7,7 +7,7 @@
     </parent>
     <artifactId>clmcat-webmvc-protobuf</artifactId>
 
-    <name>protobuf 应答</name>
+    <name>clmcat-webmvc-protobuf - protobuf 应答</name>
     <description>使用 protobuf的方式应答， 与protobuf的参数使用</description>
     <url>https://github.com/lmaos/clmcat-framework</url>
 

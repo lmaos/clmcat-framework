@@ -7,7 +7,7 @@
     </parent>
     <artifactId>clmcat-selectserver</artifactId>
 
-    <name>简单的服务选择，选主定时任务</name>
+    <name>clmcat-selectserver - 简单的服务选择，选主定时任务</name>
     <description>简单的服务选择，选主定时任务， 少量依赖的情况，简单使用。</description>
     <url>https://github.com/lmaos/clmcat-framework</url>
 

@@ -9,7 +9,7 @@
 	</parent>
 	<artifactId>clmcat-webmvc</artifactId>
 
-    <name>SpringBoot 封装 WebMvc 插件</name>
+    <name>clmcat-webmvc - SpringBoot 封装 WebMvc 插件</name>
     <description>实现 ApiController</description>
     <url>https://github.com/lmaos/clmcat-framework</url>
 
