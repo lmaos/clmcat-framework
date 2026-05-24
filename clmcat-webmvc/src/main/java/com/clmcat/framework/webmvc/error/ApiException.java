@@ -201,4 +201,24 @@ public class ApiException extends RuntimeException implements Serializable {
 	public String getMessage() {
         return message;
     }
+
+    public int getHttpStatus() {
+        return httpStatus;
+    }
+
+    public Object getContent() {
+        return content;
+    }
+
+    public Object[] getMessageArgs() {
+        return messageArgs;
+    }
+
+    public String getErrplace() {
+        return errplace;
+    }
+
+    public String getLocaleMessage() {
+        return localeMessage;
+    }
 }

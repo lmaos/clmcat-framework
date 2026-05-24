@@ -2,6 +2,8 @@ package com.clmcat.framework.webmvc;
 
 import com.clmcat.framework.webmvc.error.ApiException;
 import com.clmcat.framework.webmvc.error.ApiResultException;
+import lombok.Builder;
+import lombok.Getter;
 
 /**
  * 应答错误状态的抽象
@@ -112,7 +114,7 @@ public interface ResponseErrorStatus {
 	/**
 	 * 例如 RespError.PARAMS_REQUIRED.assertThrowResEx(userId == null); 用户ID空时会发生异常
 	 * 
-	 * @param 提示错误内容
+	 * @param message 提示错误内容
 	 * @param condition 满足这样的一个条件才允许抛出异常
 	 * @param messageArgs 异常需要的参数
 	 * @throws ApiResultException
@@ -126,12 +128,12 @@ public interface ResponseErrorStatus {
 	/**
 	 * 例如 RespError.PARAMS_REQUIRED.assertThrowApiEx(userId == null); 用户ID空时会发生异常
 	 * 
-	 * @param 提示错误内容
+	 * @param message 提示错误内容
 	 * @param condition 满足这样的一个条件才允许抛出异常
 	 * @param messageArgs 异常需要的参数
 	 * @throws ApiResultException
 	 */
-	default void assertThrowApiEx(String message, boolean condition, Object... messageArgs) throws ApiResultException {
+	default void assertThrowApiEx(String message, boolean condition, Object... messageArgs) throws ApiException {
 		if (condition) {
 			throw new ApiException(this, message).setMessageArgs(messageArgs);
 		}
@@ -140,4 +142,20 @@ public interface ResponseErrorStatus {
 	default boolean equals(String name) {
 		return getState().equals(name);
 	}
+
+
+    @Getter
+    @Builder
+    public static class SimpleResponseErrorStatus implements ResponseErrorStatus {
+        @Builder.Default
+        private int httpStatus = 200;
+        private int status;
+        private String state;
+        private String message;
+        private String localeMessage;
+
+        public String getLocaleMessage() {
+            return localeMessage == null || localeMessage.trim().isEmpty() ? state : localeMessage;
+        }
+    }
 }
