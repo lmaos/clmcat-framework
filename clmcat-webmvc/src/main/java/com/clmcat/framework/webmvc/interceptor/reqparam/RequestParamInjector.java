@@ -311,7 +311,7 @@ public class RequestParamInjector implements HandlerMethodArgumentResolver, Envi
 			return new String(bodyBytes, charset);
 		}
 		PrivateKey privateKey = RSAUtil.getPrivateKey(password);
-		byte[] bodyBytes = RSAUtil.decrypt(data, privateKey);
+		byte[] bodyBytes = RSAUtil.decryptBytes(data, privateKey);
 		return new String(bodyBytes, charset);
 	}
 
