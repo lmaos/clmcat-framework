@@ -149,7 +149,7 @@ public interface ResponseErrorStatus {
     public static class SimpleResponseErrorStatus implements ResponseErrorStatus {
         @Builder.Default
         private int httpStatus = 200;
-        private int status;
+        private Integer status;
         private String state;
         private String message;
         private String localeMessage;
