@@ -53,6 +53,7 @@
         <!-- 工具类 -->
         <commons-lang3.version>3.20.0</commons-lang3.version>
         <fastjson.version>1.2.83</fastjson.version>
+        <fastjson2.version>2.0.62</fastjson2.version>
         <commons-net.version>3.13.0</commons-net.version>
         <lombok.version>1.18.36</lombok.version>
 
@@ -291,6 +292,11 @@
                 <groupId>org.apache.dubbo</groupId>
                 <artifactId>dubbo-registry-zookeeper</artifactId>
                 <version>${dubbo.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.alibaba.fastjson2</groupId>
+                <artifactId>fastjson2</artifactId>
+                <version>${fastjson2.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
