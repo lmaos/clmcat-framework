@@ -52,22 +52,6 @@
 
     <build>
         <plugins>
-            <!-- Maven 插件插件 -->
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-plugin-plugin</artifactId>
-                <version>3.15.2</version>
-                <executions>
-                    <execution>
-                        <id>generate-plugin-descriptor</id>
-                        <phase>compile</phase>
-                        <goals>
-                            <goal>descriptor</goal>
-                        </goals>
-                    </execution>
-                </executions>
-            </plugin>
-
             <!-- 源码和javadoc插件 -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
