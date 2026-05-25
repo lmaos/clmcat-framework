@@ -19,7 +19,7 @@ public class BaseDemo {
                 .add(0)
                 .add("timeStrategy", 42, TimeStrategy.millisecond(timeMillis))
                 .add(10, MachineStrategy.autoByIp())
-                .add(11, SequenceStrategy.create(), "timeStrategy").build();
+                .add(11, SequenceStrategy.groupedWindow(4096, 8), "timeStrategy").build();
 
 
         for (int i = 0; i < 100; i++) {

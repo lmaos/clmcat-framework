@@ -11,8 +11,10 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -28,7 +30,7 @@ class CustomSnowflakeUnitTest {
                 .add("time", 32, TimeStrategy.second(0L, () -> 12_000L))
                 .add(9, () -> 0L)
                 .add("machine", 10, MachineStrategy.manual(7L))
-                .add("sequence", 12, SequenceStrategy.create(), "time")
+                .add("sequence", 12, SequenceStrategy.grouped(), "time")
                 .build();
 
         long first = snowflake.nextId();
@@ -45,7 +47,7 @@ class CustomSnowflakeUnitTest {
         AtomicLong clock = new AtomicLong(10_000L);
         CustomSnowflake snowflake = SnowflakeCustomBuilder.builder()
                 .add("time", 32, TimeStrategy.second(0L, clock::get))
-                .add(12, SequenceStrategy.create(), "time")
+                .add(12, SequenceStrategy.grouped(), "time")
                 .build();
 
         long first = snowflake.nextId();
@@ -63,7 +65,7 @@ class CustomSnowflakeUnitTest {
         AtomicLong clock = new AtomicLong(1_000L);
         CustomSnowflake snowflake = SnowflakeCustomBuilder.builder()
                 .add("time", 32, TimeStrategy.second(0L, clock::get))
-                .add(2, SequenceStrategy.create(), "time")
+                .add(2, SequenceStrategy.grouped(), "time")
                 .build();
 
         snowflake.nextId();
@@ -81,6 +83,48 @@ class CustomSnowflakeUnitTest {
                 .build();
 
         assertEquals(123L, snowflake.nextId());
+    }
+
+    @Test
+    void shouldSupportCustomTimeTickStrategy() {
+        CustomSnowflake snowflake = SnowflakeCustomBuilder.builder()
+                .add("time", 20, TimeStrategy.monotonic(5_000L, 5_000L, () -> 15_123L))
+                .build();
+
+        assertEquals(2L, snowflake.nextId());
+        assertEquals(15_000L, TimeStrategy.restore(5_000L, 2L, 5_000L));
+    }
+
+    @Test
+    void shouldKeepTimeMonotonicWhenClockMovesBackward() {
+        AtomicLong clock = new AtomicLong(10_000L);
+        CustomSnowflake snowflake = SnowflakeCustomBuilder.builder()
+                .add("time", 32, TimeStrategy.second(0L, clock::get))
+                .add(12, SequenceStrategy.grouped(), "time")
+                .build();
+
+        long first = snowflake.nextId();
+        clock.set(9_000L);
+        long second = snowflake.nextId();
+        clock.set(11_000L);
+        long third = snowflake.nextId();
+
+        assertEquals(10L, snowflake.get("time", first));
+        assertEquals(10L, snowflake.get("time", second));
+        assertEquals(11L, snowflake.get("time", third));
+        assertTrue(second > first);
+    }
+
+    @Test
+    void shouldThrowWhenTimeRollbackPolicyIsThrow() {
+        AtomicLong clock = new AtomicLong(10_000L);
+        CustomSnowflake snowflake = SnowflakeCustomBuilder.builder()
+                .add("time", 32, TimeStrategy.monotonic(0L, 1000L, clock::get, TimeStrategy.RollbackPolicy.THROW))
+                .build();
+
+        assertEquals(10L, snowflake.nextId());
+        clock.set(9_000L);
+        assertThrows(IllegalStateException.class, snowflake::nextId);
     }
 
     @Test
@@ -146,17 +190,17 @@ class CustomSnowflakeUnitTest {
                 .add(0)
                 .add("time", 32, TimeStrategy.second(0L, clock::get))
                 .add("machine", 10, MachineStrategy.manual(7L))
-                .add("sequence", 12, SequenceStrategy.create(), "time")
+                .add("sequence", 12, SequenceStrategy.grouped(), "time")
                 .build();
 
-        clock.set(5_000L);
-        long idAt5 = snowflake.nextId();
         clock.set(2_000L);
         long idAt2 = snowflake.nextId();
-        clock.set(9_000L);
-        long idAt9 = snowflake.nextId();
         clock.set(3_000L);
         long idAt3 = snowflake.nextId();
+        clock.set(5_000L);
+        long idAt5 = snowflake.nextId();
+        clock.set(9_000L);
+        long idAt9 = snowflake.nextId();
 
         List<Long> ids = new ArrayList<>(List.of(idAt5, idAt2, idAt9, idAt3));
 
@@ -184,6 +228,49 @@ class CustomSnowflakeUnitTest {
 
         assertEquals(21L, dependencyValue.get());
         assertEquals((21L << 4) | 5L, id);
+    }
+
+    @Test
+    void shouldKeepIndependentSequencePerDependencyGroup() {
+        SequenceStrategy sequenceStrategy = SequenceStrategy.grouped();
+        sequenceStrategy.initialize(4, SnowflakeCustomBuilder.maxValueForBits(4));
+
+        assertEquals(0L, sequenceStrategy.next(10L));
+        assertEquals(0L, sequenceStrategy.next(11L));
+        assertEquals(1L, sequenceStrategy.next(10L));
+        assertEquals(1L, sequenceStrategy.next(11L));
+    }
+
+    @Test
+    void shouldCleanupSequenceGroupsByMaxGroupLimit() {
+        SequenceStrategy sequenceStrategy = SequenceStrategy.grouped(SequenceStrategy.cleanup().maxGroups(2));
+        sequenceStrategy.initialize(4, SnowflakeCustomBuilder.maxValueForBits(4));
+
+        assertEquals(0L, sequenceStrategy.next(1L));
+        assertEquals(0L, sequenceStrategy.next(2L));
+        assertEquals(0L, sequenceStrategy.next(3L));
+        assertEquals(0L, sequenceStrategy.next(1L));
+    }
+
+    @Test
+    void shouldCleanupSequenceGroupsByDependencyWindow() {
+        SequenceStrategy sequenceStrategy = SequenceStrategy.groupedWindow(1L);
+        sequenceStrategy.initialize(4, SnowflakeCustomBuilder.maxValueForBits(4));
+
+        assertEquals(0L, sequenceStrategy.next(10L));
+        assertEquals(0L, sequenceStrategy.next(11L));
+        assertEquals(0L, sequenceStrategy.next(12L));
+        assertEquals(0L, sequenceStrategy.next(10L));
+    }
+
+    @Test
+    void shouldResetStandardSequenceWhenDependencySwitchesBack() {
+        SequenceStrategy sequenceStrategy = SequenceStrategy.standard();
+        sequenceStrategy.initialize(4, SnowflakeCustomBuilder.maxValueForBits(4));
+
+        assertEquals(0L, sequenceStrategy.next(10L));
+        assertEquals(0L, sequenceStrategy.next(11L));
+        assertEquals(0L, sequenceStrategy.next(10L));
     }
 
     @Test
@@ -254,7 +341,7 @@ class CustomSnowflakeUnitTest {
                 .add(0)
                 .add("time", 32, TimeStrategy.second(0L, () -> 1_000L))
                 .addFixed("reserved", 9, 0L)
-                .add("sequence", 12, SequenceStrategy.create(), "time");
+                .add("sequence", 12, SequenceStrategy.grouped(), "time");
 
         SnowflakeDescription description = builder.describe();
 
@@ -295,13 +382,105 @@ class CustomSnowflakeUnitTest {
     }
 
     @Test
+    void shouldComputeIdWithSpecifiedValuesByOrder() {
+        CustomSnowflake snowflake = SnowflakeCustomBuilder.builder()
+                .add(0)
+                .add("time", 32, TimeStrategy.second(0L, () -> 20_000L))
+                .addFixed("reserved", 9, 3L)
+                .add("machine", 10, MachineStrategy.manual(7L))
+                .add("sequence", 12, SequenceStrategy.grouped(), "time")
+                .build();
+
+        long minId = snowflake.computeId(0L, 10L, 3L, 7L, 0L);
+        long maxId = snowflake.computeId(0L, 10L, 3L, 7L, 4095L);
+        long mixedId = snowflake.computeId(0L, 10L, null, null, 1L);
+
+        assertEquals(10L, snowflake.get("time", minId));
+        assertEquals(0L, snowflake.get("sequence", minId));
+        assertEquals(4095L, snowflake.get("sequence", maxId));
+        assertEquals(3L, snowflake.get("reserved", mixedId));
+        assertEquals(7L, snowflake.get("machine", mixedId));
+    }
+
+    @Test
+    void shouldComputeMinAndMaxIdByStrategyBounds() {
+        CustomSnowflake snowflake = SnowflakeCustomBuilder.builder()
+                .add(0)
+                .add("time", 32, TimeStrategy.second(0L, () -> 20_000L))
+                .addFixed("reserved", 9, 3L)
+                .add("machine", 10, MachineStrategy.manual(7L))
+                .add("sequence", 12, SequenceStrategy.grouped(), "time")
+                .build();
+
+        long minId = snowflake.minId(0L, 10L, null, null, null);
+        long maxId = snowflake.maxId(0L, 10L, null, null, null);
+
+        assertEquals(10L, snowflake.get("time", minId));
+        assertEquals(3L, snowflake.get("reserved", minId));
+        assertEquals(7L, snowflake.get("machine", minId));
+        assertEquals(0L, snowflake.get("sequence", minId));
+        assertEquals(4095L, snowflake.get("sequence", maxId));
+        assertEquals(7L, snowflake.get("machine", maxId));
+    }
+
+    @Test
+    void shouldComputeMinAndMaxIdByName() {
+        CustomSnowflake snowflake = SnowflakeCustomBuilder.builder()
+                .add(0)
+                .add("time", 32, TimeStrategy.second(0L, () -> 20_000L))
+                .addFixed("reserved", 9, 3L)
+                .add("machine", 10, MachineStrategy.manual(7L))
+                .add("sequence", 12, SequenceStrategy.grouped(), "time")
+                .build();
+
+        Map<String, Long> specifiedValues = new HashMap<>();
+        specifiedValues.put("time", 12L);
+
+        long minId = snowflake.minId(specifiedValues);
+        long maxId = snowflake.maxId(specifiedValues);
+
+        assertEquals(12L, snowflake.get("time", minId));
+        assertEquals(0L, snowflake.get("sequence", minId));
+        assertEquals(4095L, snowflake.get("sequence", maxId));
+        assertEquals(7L, snowflake.get("machine", maxId));
+    }
+
+    @Test
+    void shouldComputeIdWithSpecifiedValuesByName() {
+        CustomSnowflake snowflake = SnowflakeCustomBuilder.builder()
+                .add(0)
+                .add("time", 32, TimeStrategy.second(0L, () -> 20_000L))
+                .addFixed("reserved", 9, 3L)
+                .add("machine", 10, MachineStrategy.manual(7L))
+                .add("sequence", 12, SequenceStrategy.grouped(), "time")
+                .build();
+
+        Map<String, Long> specifiedValues = new HashMap<>();
+        specifiedValues.put("time", 12L);
+        specifiedValues.put("sequence", 9L);
+
+        long id = snowflake.computeId(specifiedValues);
+
+        assertEquals(12L, snowflake.get("time", id));
+        assertEquals(3L, snowflake.get("reserved", id));
+        assertEquals(7L, snowflake.get("machine", id));
+        assertEquals(9L, snowflake.get("sequence", id));
+    }
+
+    @Test
+    void shouldConvertElapsedTimeToMillis() {
+        assertEquals(10_000L, TimeStrategy.toElapsedMillis(2L, 5_000L));
+        assertEquals(15_000L, TimeStrategy.restore(5_000L, 2L, 5_000L));
+    }
+
+    @Test
     void shouldReadSegmentValueDirectlyFromSnowflakeId() {
         CustomSnowflake snowflake = SnowflakeCustomBuilder.builder()
                 .add(0)
                 .add("time", 32, TimeStrategy.second(0L, () -> 12_000L))
                 .addFixed("reserved", 9, 3L)
                 .add("machine", 10, MachineStrategy.manual(7L))
-                .add("sequence", 12, SequenceStrategy.create(), "time")
+                .add("sequence", 12, SequenceStrategy.grouped(), "time")
                 .build();
 
         snowflake.nextId();
@@ -321,7 +500,7 @@ class CustomSnowflakeUnitTest {
                 .add("time", 32, TimeStrategy.second(0L, () -> 12_000L))
                 .addFixed("reserved", 9, 3L)
                 .add("machine", 10, MachineStrategy.manual(7L))
-                .add("sequence", 12, SequenceStrategy.create(), "time")
+                .add("sequence", 12, SequenceStrategy.grouped(), "time")
                 .build();
 
         snowflake.nextId();

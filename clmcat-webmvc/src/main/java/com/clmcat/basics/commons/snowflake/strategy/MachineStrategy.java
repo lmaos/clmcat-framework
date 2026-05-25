@@ -28,7 +28,30 @@ public final class MachineStrategy {
     }
 
     public static SnowflakeValueStrategy manual(long machineId) {
-        return () -> machineId;
+        return new FixedMachineIdStrategy(machineId);
+    }
+
+    private static final class FixedMachineIdStrategy implements SnowflakeValueStrategy {
+        private final long machineId;
+
+        private FixedMachineIdStrategy(long machineId) {
+            this.machineId = machineId;
+        }
+
+        @Override
+        public long next() {
+            return machineId;
+        }
+
+        @Override
+        public long min() {
+            return machineId;
+        }
+
+        @Override
+        public long max() {
+            return machineId;
+        }
     }
 
     private static final class AutoMachineIdStrategy implements SnowflakeValueStrategy, SnowflakeBitAwareStrategy {
@@ -53,6 +76,16 @@ public final class MachineStrategy {
                 }
                 return machineId;
             }
+        }
+
+        @Override
+        public long min() {
+            return next();
+        }
+
+        @Override
+        public long max() {
+            return next();
         }
 
         private long resolveMachineId(long maxValue) {
