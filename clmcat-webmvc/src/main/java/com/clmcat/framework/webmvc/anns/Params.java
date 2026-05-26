@@ -29,7 +29,13 @@ public @interface Params {
 	String defaultValue() default ValueConstants.DEFAULT_NONE;
 
 	ParamsScope scope() default ParamsScope.PARAM;
-	
+
+    /**
+     * 描述
+     *
+     */
+    String description() default "";
+
 	public static enum ParamsScope {
 		PARAM, HEADER, COOKIE, IP, REQUEST, NONE;
 	}
