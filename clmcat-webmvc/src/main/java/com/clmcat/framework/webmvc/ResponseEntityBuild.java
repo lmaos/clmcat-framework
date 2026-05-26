@@ -189,7 +189,7 @@ public class ResponseEntityBuild {
 	}
 	public ResponseEntityBuild setLocale(String locale) {
 		if (locale != null && locale.length() > 1) {
-			this.locale = Locale.forLanguageTag(locale);
+			this.locale = Locale.forLanguageTag(locale.replace("_", "-"));
 		}
 		return this;
 	}
@@ -289,56 +289,33 @@ public class ResponseEntityBuild {
 		if (request == null) {
 			return this.locale;
 		}
-		// 语言
-		Locale locale = (Locale) request.getAttribute("userLanguage");
-		if (locale == null) {
-			ResponseInternationalization ri =  (ResponseInternationalization)request.getAttribute(ResponseInternationalization.KEY);
-			if (ri != null) {
-				locale = ri.getLocale(request);
+		// RequestInterceptor 会先把当前请求最终使用的语言写到 userLocale。
+		Locale locale = (Locale) request.getAttribute("userLocale");
+		if (locale != null) {
+			return locale;
+		}
+		locale = (Locale) request.getAttribute("userLanguage");
+		if (locale != null) {
+			request.setAttribute("userLocale", locale);
+			return locale;
+		}
+		ResponseInternationalization ri =  (ResponseInternationalization)request.getAttribute(ResponseInternationalization.KEY);
+		if (ri != null) {
+			locale = ri.getLocale(request);
+			if (locale != null) {
+				request.setAttribute("userLocale", locale);
+				return locale;
 			}
 		}
-		if (locale == null) {
-
-			/// 从header｜参数查询。
-			String localeLanguage = request.getHeader("userLanguage");
-			if (localeLanguage == null || localeLanguage.length() < 2) {
-				localeLanguage = request.getParameter("userLanguage");
-			}
-			/// 不存在从： Accept-Language 查询。
-			if (localeLanguage == null || localeLanguage.length() < 2) {
-				localeLanguage = request.getHeader("Accept-Language");
-				if (localeLanguage != null && localeLanguage.length() > 1) {
-					locale = parseAccessLocale(localeLanguage);
-				}
-			}
-			/// 语言存在
-			if (localeLanguage != null && localeLanguage.length() > 1) {
-				if (locale == null) {
-					locale = Locale.forLanguageTag(localeLanguage.replace("_", "-"));
-				}
-				request.setAttribute("userLanguage", locale);
-			}
-			/// 均不存在使用默认值。
-			if (locale == null) {
-				locale = this.locale;
-			}
+		locale = request.getLocale();
+		if (locale != null && StringUtils.isNotBlank(locale.getLanguage())) {
+			request.setAttribute("userLocale", locale);
+			return locale;
 		}
-		return locale;
-	}
-
-	private static Locale parseAccessLocale(String locale) {
-		if (locale == null || locale.isEmpty()) {
-			return null;
+		if (this.locale != null) {
+			return this.locale;
 		}
-		int i = locale.indexOf(',');
-		if (i != -1) {
-			locale = locale.substring(0, i);
-		}
-		i = locale.indexOf(';');
-		if (i != -1) {
-			locale = locale.substring(0, i);
-		}
-		return Locale.forLanguageTag(locale);
+		return (Locale) request.getAttribute(ResponseInternationalization.DEFAULT_LOCALE);
 	}
 	
 	/**

@@ -30,31 +30,7 @@ public @interface Params {
 
 	ParamsScope scope() default ParamsScope.PARAM;
 	
-	
-	/**
-	 * BODY 进行授权加密方式请求, 授权的配置名 (只支持POST提交的方式)
-	 * 
-	 * ns.params.auth.default.aes: 
-	     password: 密钥
-         decode:   数据解码
-	 * ns.params.auth.default.rsa: 
-         password: 私钥
-         decode:   数据解码
-	 */
-	String authName() default "default";
-	/**
-	 * BODY 进行授权加密方式请求 (只支持POST提交的方式)
-	 */
-	ParamsAuthEncrypt authEncrypt() default ParamsAuthEncrypt.NONE;
-	
-	String authEncryptCharset() default "UTF-8";
-	
 	public static enum ParamsScope {
-		PARAM, HEADER, COOKIE, NONE;
+		PARAM, HEADER, COOKIE, IP, REQUEST, NONE;
 	}
-	
-	public static enum ParamsAuthEncrypt {
-		NONE, AES, BASE64, RSA
-	}
-	
 }

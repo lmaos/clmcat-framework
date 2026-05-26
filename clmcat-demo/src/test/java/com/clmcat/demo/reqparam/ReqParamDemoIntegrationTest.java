@@ -70,4 +70,14 @@ class ReqParamDemoIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content.id").value(12));
     }
+
+    @Test
+    void shouldAutoFillClientIpInIntegrationPath() throws Exception {
+        mockMvc.perform(get("/reqparam/phone")
+                        .param("phone", "1234")
+                        .header("X-Forwarded-For", "unknown, 203.0.113.10, 10.0.0.1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.phone").value("1234"))
+                .andExpect(jsonPath("$.content.clientIp").value("203.0.113.10"));
+    }
 }

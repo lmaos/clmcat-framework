@@ -17,7 +17,6 @@ import org.springframework.web.filter.FormContentFilter;
 import org.springframework.web.method.support.ModelAndViewContainer;
 
 import com.clmcat.framework.webmvc.anns.Params;
-import com.clmcat.framework.webmvc.anns.Params.ParamsAuthEncrypt;
 import com.clmcat.framework.webmvc.anns.Params.ParamsScope;
 import com.clmcat.framework.webmvc.interceptor.reqparam.CustomRequestParameter;
 import com.clmcat.framework.webmvc.interceptor.reqparam.RequestParamInjector;
@@ -25,6 +24,7 @@ import com.clmcat.framework.webmvc.interceptor.reqparam.RequestParamInjector;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
 class RequestParamInjectorUnitTest {
 
@@ -141,6 +141,66 @@ class RequestParamInjectorUnitTest {
     }
 
     @Test
+    void shouldResolveIpAliasFromForwardHeaders() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/reqparam");
+        request.addHeader("X-Forwarded-For", "unknown, 203.0.113.7, 10.0.0.8");
+
+        Object value = injector.resolveArgument(methodParameter("clientIpAlias"), new ModelAndViewContainer(),
+                new ServletWebRequest(request, new MockHttpServletResponse()), null);
+
+        assertEquals("203.0.113.7", value);
+    }
+
+    @Test
+    void shouldResolveIpScopeParameter() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/reqparam");
+        request.addHeader("Forwarded", "for=198.51.100.9;proto=https");
+
+        Object value = injector.resolveArgument(methodParameter("clientIpScoped"), new ModelAndViewContainer(),
+                new ServletWebRequest(request, new MockHttpServletResponse()), null);
+
+        assertEquals("198.51.100.9", value);
+    }
+
+    @Test
+    void shouldResolveRequestScopedSimpleParameter() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/reqparam");
+        request.setAttribute("requestId", "req-1");
+
+        Object value = injector.resolveArgument(methodParameter("requestScopedId"), new ModelAndViewContainer(),
+                new ServletWebRequest(request, new MockHttpServletResponse()), null);
+
+        assertEquals("req-1", value);
+    }
+
+    @Test
+    void shouldResolveRequestScopedBeanDirectly() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/reqparam");
+        PhoneLoginDto dto = new PhoneLoginDto();
+        dto.setPhone("1234");
+        dto.setCode("4321");
+        request.setAttribute("loginDto", dto);
+
+        PhoneLoginDto value = (PhoneLoginDto) injector.resolveArgument(methodParameter("requestScopedPhoneLogin"),
+                new ModelAndViewContainer(), new ServletWebRequest(request, new MockHttpServletResponse()), null);
+
+        assertSame(dto, value);
+    }
+
+    @Test
+    void shouldResolveRequestScopedBeanFields() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/reqparam");
+        request.setAttribute("phone", "1234");
+        request.setAttribute("code", "4321");
+
+        PhoneLoginDto value = (PhoneLoginDto) injector.resolveArgument(methodParameter("requestScopedBeanFields"),
+                new ModelAndViewContainer(), new ServletWebRequest(request, new MockHttpServletResponse()), null);
+
+        assertEquals("1234", value.getPhone());
+        assertEquals("4321", value.getCode());
+    }
+
+    @Test
     void shouldResolveHeaderScopedFieldOnBean() throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/reqparam");
         request.addParameter("phone", "1234");
@@ -194,19 +254,6 @@ class RequestParamInjectorUnitTest {
     }
 
     @Test
-    void shouldDecodeBase64JsonBody() throws Exception {
-        MockHttpServletRequest request = new MockHttpServletRequest("PUT", "/reqparam");
-        request.setContentType(MediaType.TEXT_PLAIN_VALUE);
-        request.setContent("eyJwaG9uZSI6IjEyMzQiLCJjb2RlIjoiNDMyMSJ9".getBytes(StandardCharsets.UTF_8));
-
-        PhoneLoginDto value = (PhoneLoginDto) injector.resolveArgument(methodParameter("base64PhoneLogin"),
-                new ModelAndViewContainer(), new ServletWebRequest(request, new MockHttpServletResponse()), null);
-
-        assertEquals("1234", value.getPhone());
-        assertEquals("4321", value.getCode());
-    }
-
-    @Test
     void shouldApplyFieldDefaultValueOnBean() throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/reqparam");
         request.addParameter("phone", "1234");
@@ -217,6 +264,19 @@ class RequestParamInjectorUnitTest {
 
         assertEquals("1234", value.getPhone());
         assertEquals("guest", value.getCode());
+    }
+
+    @Test
+    void shouldAutoFillClientIpFieldOnBean() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/phone");
+        request.addParameter("phone", "1234");
+        request.addHeader("X-Real-IP", "198.51.100.15");
+
+        PhoneLoginDto value = (PhoneLoginDto) injector.resolveArgument(methodParameter("phoneLogin"),
+                new ModelAndViewContainer(), new ServletWebRequest(request, new MockHttpServletResponse()), null);
+
+        assertEquals("1234", value.getPhone());
+        assertEquals("198.51.100.15", value.getClientIp());
     }
 
     private HttpServletRequest applyFormContentFilter(MockHttpServletRequest request) throws Exception {
@@ -260,6 +320,21 @@ class RequestParamInjectorUnitTest {
         void cookieToken(@Params(name = "session", scope = ParamsScope.COOKIE) String token) {
         }
 
+        void clientIpAlias(@Params(name = "IP", required = false) String clientIp) {
+        }
+
+        void clientIpScoped(@Params(name = "clientIp", scope = ParamsScope.IP, required = false) String clientIp) {
+        }
+
+        void requestScopedId(@Params(name = "requestId", scope = ParamsScope.REQUEST, required = false) String requestId) {
+        }
+
+        void requestScopedPhoneLogin(@Params(name = "loginDto", scope = ParamsScope.REQUEST) PhoneLoginDto dto) {
+        }
+
+        void requestScopedBeanFields(@Params(scope = ParamsScope.REQUEST) PhoneLoginDto dto) {
+        }
+
         void headerAwarePhoneLogin(@Params HeaderAwarePhoneLoginDto dto) {
         }
 
@@ -270,9 +345,6 @@ class RequestParamInjectorUnitTest {
         }
 
         void noneScopedId(@Params(name = "id", required = false, scope = ParamsScope.NONE) Integer id) {
-        }
-
-        void base64PhoneLogin(@Params(authEncrypt = ParamsAuthEncrypt.BASE64) PhoneLoginDto dto) {
         }
 
         void defaultValuePhoneLogin(@Params DefaultValuePhoneLoginDto dto) {

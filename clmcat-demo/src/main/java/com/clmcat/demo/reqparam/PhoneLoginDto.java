@@ -4,6 +4,7 @@ public class PhoneLoginDto {
     private String phone;
     private String countryCode;
     private String code;
+    private String clientIp;
 
     public String getPhone() {
         return phone;
@@ -27,5 +28,13 @@ public class PhoneLoginDto {
 
     public void setCode(String code) {
         this.code = code;
+    }
+
+    public String getClientIp() {
+        return clientIp;
+    }
+
+    public void setClientIp(String clientIp) {
+        this.clientIp = clientIp;
     }
 }

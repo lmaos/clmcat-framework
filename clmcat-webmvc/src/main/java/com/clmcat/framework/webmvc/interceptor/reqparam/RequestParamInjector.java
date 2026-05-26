@@ -6,12 +6,9 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.math.BigDecimal;
-import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-import java.security.PrivateKey;
 import java.sql.Timestamp;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -24,17 +21,11 @@ import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.math.NumberUtils;
-import com.clmcat.basics.commons.util.CodecUtils;
 import com.clmcat.basics.commons.util.DefaultVal;
-import com.clmcat.basics.commons.util.RSAUtil;
-import com.clmcat.framework.webmvc.ResponseStatus;
 import com.clmcat.framework.webmvc.anns.Params;
-import com.clmcat.framework.webmvc.anns.Params.ParamsAuthEncrypt;
 import com.clmcat.framework.webmvc.anns.Params.ParamsScope;
-import org.springframework.context.EnvironmentAware;
 import org.springframework.core.MethodParameter;
 import org.springframework.core.annotation.AnnotatedElementUtils;
-import org.springframework.core.env.Environment;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ValueConstants;
 import org.springframework.web.bind.support.WebDataBinderFactory;
@@ -45,18 +36,12 @@ import org.springframework.web.method.support.ModelAndViewContainer;
 
 import com.alibaba.fastjson.JSONObject;
 
-public class RequestParamInjector implements HandlerMethodArgumentResolver, EnvironmentAware {
+public class RequestParamInjector implements HandlerMethodArgumentResolver {
 	private static final String CURRENT_BODY_ATTR = "currentBody";
 	private static final String CURRENT_BODY_TEXT_ATTR = "currentBodyText";
 	private static final String HEADER_CONTENT_TYPE = "Content-Type";
-	private static final String HEADER_BODY_AUTH_NAME = "body-auth-name";
-	private static final String HEADER_BODY_AUTH_ENCRYPT = "body-auth-encrypt";
-	private static final String HEADER_BODY_AUTH_DECODE = "body-auth-decode";
 
 	private static final Map<String, List<MethodWrapper>> setMethodCaches = new ConcurrentHashMap<>();
-	private static final Map<String, String> authPasswordCache = new ConcurrentHashMap<>();
-
-	private Environment environment;
 
 	@Override
 	public boolean supportsParameter(MethodParameter parameter) {
@@ -64,14 +49,12 @@ public class RequestParamInjector implements HandlerMethodArgumentResolver, Envi
 	}
 
 	@Override
-	public void setEnvironment(Environment environment) {
-		this.environment = environment;
-	}
-
-	@Override
 	public Object resolveArgument(MethodParameter parameter, ModelAndViewContainer mavContainer,
 			NativeWebRequest webRequest, WebDataBinderFactory binderFactory) throws Exception {
 		Params params = getParams(parameter);
+		if (params.scope() == ParamsScope.REQUEST) {
+			return resolveRequestAttribute(parameter, params, webRequest);
+		}
 		if (shouldUseJsonResolver(params, webRequest)) {
 			return applicationJson(parameter, mavContainer, webRequest, binderFactory);
 		}
@@ -81,7 +64,7 @@ public class RequestParamInjector implements HandlerMethodArgumentResolver, Envi
 	public Object applicationJson(MethodParameter parameter, ModelAndViewContainer mavContainer,
 			NativeWebRequest webRequest, WebDataBinderFactory binderFactory) throws Exception {
 		Params params = getParams(parameter);
-		JSONObject jsonObject = getRequestJsonBody(webRequest, params);
+		JSONObject jsonObject = getRequestJsonBody(webRequest);
 		CustomRequestParameter.getOrCreate(webRequest).fill(jsonObject);
 
 		Class<?> type = parameter.getParameterType();
@@ -117,12 +100,6 @@ public class RequestParamInjector implements HandlerMethodArgumentResolver, Envi
 		if (!supportsRequestBody(method)) {
 			return false;
 		}
-		if (params.authEncrypt() != ParamsAuthEncrypt.NONE) {
-			return true;
-		}
-		if (StringUtils.isNotBlank(webRequest.getHeader(HEADER_BODY_AUTH_NAME))) {
-			return true;
-		}
 		String contentType = webRequest.getHeader(HEADER_CONTENT_TYPE);
 		if (contentType != null && contentType.startsWith("application/json")) {
 			return true;
@@ -140,7 +117,7 @@ public class RequestParamInjector implements HandlerMethodArgumentResolver, Envi
 				|| "DELETE".equalsIgnoreCase(method);
 	}
 
-	private JSONObject getRequestJsonBody(NativeWebRequest webRequest, Params params) throws Exception {
+	private JSONObject getRequestJsonBody(NativeWebRequest webRequest) throws Exception {
 		JSONObject jsonObject = (JSONObject) webRequest.getAttribute(CURRENT_BODY_ATTR, RequestAttributes.SCOPE_REQUEST);
 		if (jsonObject != null) {
 			return jsonObject;
@@ -148,7 +125,6 @@ public class RequestParamInjector implements HandlerMethodArgumentResolver, Envi
 		jsonObject = new JSONObject();
 		String body = getRequestBody(webRequest);
 		if (StringUtils.isNotBlank(body)) {
-			body = bodyAuthDecipher(params, webRequest, body);
 			if (body.startsWith("{") && body.endsWith("}")) {
 				jsonObject = JSONObject.parseObject(body);
 			}
@@ -199,19 +175,19 @@ public class RequestParamInjector implements HandlerMethodArgumentResolver, Envi
 		String name = resolveParamName(parameter, params);
 		Object value = null;
 		if (params.scope() != ParamsScope.PARAM && params.scope() != ParamsScope.NONE) {
-			value = parse(getParam(name, params, webRequest), type);
+			value = convertValue(getParamValue(name, params, webRequest), type);
 		} else {
 			value = getJson(name, jsonObject, type);
 		}
 		if (value == null) {
-			value = parse(getParam(name, params, webRequest), type);
+			value = convertValue(getParamValue(name, params, webRequest), type);
 		}
 		return applyDefaultValue(name, type, params, value);
 	}
 
 	private Object resolveSimpleFormValue(String name, Class<?> type, Params params, NativeWebRequest webRequest)
 			throws MissingServletRequestParameterException {
-		Object value = parse(getParam(name, params, webRequest), type);
+		Object value = convertValue(getParamValue(name, params, webRequest), type);
 		return applyDefaultValue(name, type, params, value);
 	}
 
@@ -223,7 +199,7 @@ public class RequestParamInjector implements HandlerMethodArgumentResolver, Envi
 		}
 		List<MethodWrapper> methods = getSetMethods(type, beanPrefix(params));
 		for (MethodWrapper wrapper : methods) {
-			Object fieldValue = parse(getParam(wrapper, params, webRequest), wrapper.getType());
+			Object fieldValue = convertValue(getParamValue(wrapper, params, webRequest), wrapper.getType());
 			if (fieldValue != null) {
 				invokeMethod(wrapper.method, result, fieldValue);
 				continue;
@@ -250,7 +226,7 @@ public class RequestParamInjector implements HandlerMethodArgumentResolver, Envi
 		Object value = createInstance(type);
 		List<MethodWrapper> methods = getSetMethods(type, prefix);
 		for (MethodWrapper wrapper : methods) {
-			Object fieldValue = parse(getParam(wrapper, params, webRequest), wrapper.getType());
+			Object fieldValue = convertValue(getParamValue(wrapper, params, webRequest), wrapper.getType());
 			if (fieldValue == null) {
 				fieldValue = resolveFieldDefaultValue(wrapper);
 			}
@@ -290,59 +266,34 @@ public class RequestParamInjector implements HandlerMethodArgumentResolver, Envi
 		return DefaultVal.getDefaultValue(type);
 	}
 
-	private String bodyAuthDecipher(Params params, NativeWebRequest webRequest, String body) throws Exception {
-		ParamsAuthEncrypt authEncrypt = resolveAuthEncrypt(params, webRequest.getHeader(HEADER_BODY_AUTH_ENCRYPT));
-		if (authEncrypt == ParamsAuthEncrypt.NONE) {
-			return body;
+	private Object resolveRequestAttribute(MethodParameter parameter, Params params, NativeWebRequest webRequest) throws Exception {
+		Class<?> type = parameter.getParameterType();
+		String name = resolveParamName(parameter, params);
+		Object requestValue = getRequestAttribute(name, webRequest);
+		if (isSimpleType(type)) {
+			Object value = convertValue(requestValue, type);
+			return applyDefaultValue(name, type, params, value);
 		}
-		Charset charset = Charset.forName(params.authEncryptCharset());
-		if (authEncrypt == ParamsAuthEncrypt.BASE64) {
-			byte[] bodyBytes = Base64.getDecoder().decode(body.getBytes(charset));
-			return new String(bodyBytes, charset);
+		if (requestValue != null && type.isInstance(requestValue)) {
+			return requestValue;
 		}
-		ParamAuth auth = getParamAuth(params, authEncrypt, webRequest);
-		String password = auth.getPassword();
-		if (StringUtils.isBlank(password)) {
-			ResponseStatus.AUTH_VERIFY_FAIL.throwResEx();
-		}
-		byte[] data = auth.decodeBody(body, charset);
-		if (authEncrypt == ParamsAuthEncrypt.AES) {
-			byte[] bodyBytes = CodecUtils.AES.decrypt(data, password);
-			return new String(bodyBytes, charset);
-		}
-		PrivateKey privateKey = RSAUtil.getPrivateKey(password);
-		byte[] bodyBytes = RSAUtil.decryptBytes(data, privateKey);
-		return new String(bodyBytes, charset);
+		return resolveFormBean(type, beanPrefix(params), params, webRequest);
 	}
 
-	private ParamsAuthEncrypt resolveAuthEncrypt(Params params, String headerAuthEncrypt) {
-		if (StringUtils.isBlank(headerAuthEncrypt)) {
-			return params.authEncrypt();
-		}
-		if ("AES".equalsIgnoreCase(headerAuthEncrypt)) {
-			return ParamsAuthEncrypt.AES;
-		}
-		if ("RSA".equalsIgnoreCase(headerAuthEncrypt)) {
-			return ParamsAuthEncrypt.RSA;
-		}
-		if ("BASE64".equalsIgnoreCase(headerAuthEncrypt)) {
-			return ParamsAuthEncrypt.BASE64;
-		}
-		return params.authEncrypt();
-	}
-
-	private String getParam(MethodWrapper wrapper, Params parentParams, NativeWebRequest webRequest) {
+	private Object getParamValue(MethodWrapper wrapper, Params parentParams, NativeWebRequest webRequest) {
 		Params params = wrapper.params;
-		if (parentParams.scope() == ParamsScope.HEADER || parentParams.scope() == ParamsScope.COOKIE) {
+		if (parentParams.scope() == ParamsScope.HEADER
+				|| parentParams.scope() == ParamsScope.COOKIE
+				|| parentParams.scope() == ParamsScope.REQUEST) {
 			params = parentParams;
 		}
 		if (params == null) {
 			params = parentParams;
 		}
-		return getParam(wrapper.paramName, params, webRequest);
+		return getParamValue(wrapper.paramName, params, webRequest);
 	}
 
-	private String getParam(String paramName, Params params, NativeWebRequest webRequest) {
+	private Object getParamValue(String paramName, Params params, NativeWebRequest webRequest) {
 		ParamsScope scope = params == null ? ParamsScope.PARAM : params.scope();
 		if (scope == ParamsScope.NONE) {
 			return webRequest.getParameter(paramName);
@@ -367,7 +318,21 @@ public class RequestParamInjector implements HandlerMethodArgumentResolver, Envi
 			}
 			return null;
 		}
+		if (scope == ParamsScope.IP) {
+			return CustomRequestParameter.getOrCreate(webRequest).getClientIp();
+		}
+		if (scope == ParamsScope.REQUEST) {
+			return getRequestAttribute(paramName, webRequest);
+		}
 		return webRequest.getParameter(paramName);
+	}
+
+	private Object getRequestAttribute(String paramName, NativeWebRequest webRequest) {
+		HttpServletRequest request = webRequest.getNativeRequest(HttpServletRequest.class);
+		if (request == null || StringUtils.isBlank(paramName)) {
+			return null;
+		}
+		return request.getAttribute(paramName);
 	}
 
 	private void invokeMethod(Method method, Object target, Object value) throws Exception {
@@ -474,6 +439,16 @@ public class RequestParamInjector implements HandlerMethodArgumentResolver, Envi
 		return DefaultVal.getDefaultValue(type);
 	}
 
+	private Object convertValue(Object value, Class<?> type) {
+		if (value == null) {
+			return null;
+		}
+		if (type.isInstance(value)) {
+			return value;
+		}
+		return parse(String.valueOf(value), type);
+	}
+
 	private Object getJson(String name, JSONObject jsonObject, Class<?> type) {
 		if (jsonObject == null || StringUtils.isBlank(name)) {
 			return null;
@@ -525,32 +500,6 @@ public class RequestParamInjector implements HandlerMethodArgumentResolver, Envi
 			return node.getBigDecimal(nodeName);
 		}
 		return node.get(nodeName);
-	}
-
-	private ParamAuth getParamAuth(Params params, ParamsAuthEncrypt authEncrypt, NativeWebRequest webRequest) {
-		String authName = webRequest.getHeader(HEADER_BODY_AUTH_NAME);
-		if (StringUtils.isBlank(authName)) {
-			authName = params.authName();
-		}
-		String envName = "ns.params.auth." + authName + "." + authEncrypt.name().toLowerCase();
-		String password = authPasswordCache.computeIfAbsent(buildAuthCacheKey(authEncrypt, authName),
-				key -> environment == null ? null : environment.getProperty(envName + ".password"));
-		String decode = webRequest.getHeader(HEADER_BODY_AUTH_DECODE);
-		if (StringUtils.isBlank(decode) && environment != null) {
-			decode = environment.getProperty(envName + ".decode", "base64");
-		}
-		if (StringUtils.isBlank(decode)) {
-			decode = "base64";
-		}
-		ParamAuth paramAuth = new ParamAuth();
-		paramAuth.setDecode(decode);
-		paramAuth.setPassword(password);
-		paramAuth.setCharset(Charset.forName(params.authEncryptCharset()));
-		return paramAuth;
-	}
-
-	private String buildAuthCacheKey(ParamsAuthEncrypt authEncrypt, String authName) {
-		return authEncrypt.name() + "-" + authName;
 	}
 
 	private boolean isSimpleType(Class<?> type) {

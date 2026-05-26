@@ -1,5 +1,7 @@
 package com.clmcat.framework.webmvc.interceptor;
 
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -43,6 +45,10 @@ import jakarta.servlet.http.HttpServletResponse;
 public class RequestInterceptor implements HandlerInterceptor, ApplicationContextAware  {
 	
 	private static final Logger log = LoggerFactory.getLogger(RequestInterceptor.class);
+    private static final String ATTR_USER_LOCALE = "userLocale";
+    private static final String ATTR_USER_LANGUAGE = "userLanguage";
+    private static final String HEADER_ACCEPT_LANGUAGE = "Accept-Language";
+    private static final String HEADER_LOCALE = "locale";
 
     @Autowired
 	LoginVerifyService loginVerifyService;
@@ -121,6 +127,99 @@ public class RequestInterceptor implements HandlerInterceptor, ApplicationContex
             request.setAttribute(ResponseInternationalization.KEY, responseInternationalization);
             request.setAttribute(ResponseInternationalization.DEFAULT_LOCALE, responseInternationalization.getDefaultLocale());
         }
+        configRequestLocale(request);
+    }
+
+    private void configRequestLocale(HttpServletRequest request) {
+        // userLanguage 表示用户显式指定；userLocale 表示当前请求最终生效的语言。
+        Locale userLocale = (Locale) request.getAttribute(ATTR_USER_LOCALE);
+        if (hasLocale(userLocale)) {
+            return;
+        }
+        Locale userLanguage = resolveRequestLocale(request, ATTR_USER_LANGUAGE);
+        if (!hasLocale(userLanguage)) {
+            userLanguage = resolveRequestLocale(request, HEADER_LOCALE);
+        }
+        if (hasLocale(userLanguage)) {
+            request.setAttribute(ATTR_USER_LANGUAGE, userLanguage);
+            userLocale = userLanguage;
+        }
+        // Accept-Language 只作为浏览器默认值回退，不覆盖 userLanguage 的语义。
+        if (!hasLocale(userLocale)) {
+            userLocale = parseAcceptLanguage(request.getHeader(HEADER_ACCEPT_LANGUAGE));
+        }
+        if (!hasLocale(userLocale)) {
+            Locale requestLocale = request.getLocale();
+            if (hasLocale(requestLocale)) {
+                userLocale = requestLocale;
+            }
+        }
+        if (!hasLocale(userLocale)) {
+            Locale defaultLocale = (Locale) request.getAttribute(ResponseInternationalization.DEFAULT_LOCALE);
+            if (hasLocale(defaultLocale)) {
+                userLocale = defaultLocale;
+            }
+        }
+        if (hasLocale(userLocale)) {
+            request.setAttribute(ATTR_USER_LOCALE, userLocale);
+        }
+    }
+
+    private Locale resolveRequestLocale(HttpServletRequest request, String key) {
+        String localeValue = request.getHeader(key);
+        if (StringUtils.isBlank(localeValue)) {
+            localeValue = request.getParameter(key);
+        }
+        return parseLocale(localeValue);
+    }
+
+    private Locale parseAcceptLanguage(String localeValue) {
+        if (StringUtils.isBlank(localeValue)) {
+            return null;
+        }
+        try {
+            List<Locale.LanguageRange> ranges = Locale.LanguageRange.parse(localeValue);
+            for (Locale.LanguageRange range : ranges) {
+                String rangeValue = range.getRange();
+                if ("*".equals(rangeValue)) {
+                    continue;
+                }
+                Locale locale = parseLocale(rangeValue);
+                if (hasLocale(locale)) {
+                    return locale;
+                }
+            }
+        } catch (IllegalArgumentException e) {
+            log.debug("parse Accept-Language fail: {}", localeValue, e);
+        }
+        return parseLocale(localeValue);
+    }
+
+    private Locale parseLocale(String localeValue) {
+        if (StringUtils.isBlank(localeValue)) {
+            return null;
+        }
+        String normalized = localeValue.trim().replace('_', '-');
+        int commaIndex = normalized.indexOf(',');
+        if (commaIndex >= 0) {
+            normalized = normalized.substring(0, commaIndex).trim();
+        }
+        int semicolonIndex = normalized.indexOf(';');
+        if (semicolonIndex >= 0) {
+            normalized = normalized.substring(0, semicolonIndex).trim();
+        }
+        if (normalized.isEmpty() || "*".equals(normalized)) {
+            return null;
+        }
+        Locale locale = Locale.forLanguageTag(normalized);
+        if (!hasLocale(locale)) {
+            return null;
+        }
+        return locale;
+    }
+
+    private boolean hasLocale(Locale locale) {
+        return locale != null && StringUtils.isNotBlank(locale.getLanguage());
     }
    
     // 配置当前应答格式

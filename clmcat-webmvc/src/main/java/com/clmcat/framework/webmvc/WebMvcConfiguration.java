@@ -5,7 +5,6 @@ import java.util.List;
 
 import com.clmcat.framework.webmvc.error.ExceptionHandler;
 import com.clmcat.framework.webmvc.interceptor.LocaleParameterInjector;
-import com.clmcat.framework.webmvc.interceptor.LocaleParameterProperty;
 import com.clmcat.framework.webmvc.interceptor.RequestInterceptor;
 import com.clmcat.framework.webmvc.interceptor.TokenParameterInjector;
 import com.clmcat.framework.webmvc.interceptor.reqparam.RequestParamInjector;
@@ -15,7 +14,6 @@ import com.clmcat.framework.webmvc.verify.LoginVerifyService;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
-import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationContextAware;
 import org.springframework.context.annotation.Bean;
@@ -94,13 +92,6 @@ public class WebMvcConfiguration implements WebMvcConfigurer, SmartInitializingS
         registry.addInterceptor(requestInterceptor()).order(-1);
     }
 
-
-    @ConditionalOnMissingBean
-    @ConfigurationProperties(prefix = "ns.webmvc.locale")
-    @Bean
-    LocaleParameterProperty localeParameterProperty() {
-    	return new LocaleParameterProperty();
-    };
     @Override
     public void afterSingletonsInstantiated() {
     	// TODO Auto-generated method stub
