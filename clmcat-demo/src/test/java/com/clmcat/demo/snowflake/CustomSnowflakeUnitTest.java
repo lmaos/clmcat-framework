@@ -140,6 +140,14 @@ class CustomSnowflakeUnitTest {
     }
 
     @Test
+    void shouldKeepAutoMachineIdStableAcrossStrategyInstances() {
+        long machineId1 = MachineStrategy.getMachineId();
+        long machineId2 = MachineStrategy.getMachineId();
+
+        assertEquals(machineId1, machineId2);
+    }
+
+    @Test
     void shouldRejectSnowflakeThatExceedsSixtyFourBits() {
         assertThrows(IllegalStateException.class, () -> SnowflakeCustomBuilder.builder()
                 .add(32, () -> 0L)

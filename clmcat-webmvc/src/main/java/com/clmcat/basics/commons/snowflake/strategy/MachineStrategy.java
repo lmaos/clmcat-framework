@@ -3,16 +3,17 @@ package com.clmcat.basics.commons.snowflake.strategy;
 import com.clmcat.basics.commons.snowflake.SnowflakeBitAwareStrategy;
 import com.clmcat.basics.commons.snowflake.SnowflakeCustomBuilder;
 import com.clmcat.basics.commons.snowflake.SnowflakeValueStrategy;
+import com.clmcat.basics.commons.util.NetworkUtils;
 
 import java.net.InetAddress;
-import java.net.NetworkInterface;
-import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
-import java.util.Enumeration;
+import java.util.List;
 import java.util.zip.CRC32;
 
 public final class MachineStrategy {
     private static final int DEFAULT_BITS = 10;
+    private static final String DEFAULT_MACHINE_ADDRESS = resolveMachineAddressText();
+    private static final long DEFAULT_MACHINE_HASH = hashMachineAddress(DEFAULT_MACHINE_ADDRESS);
 
     private MachineStrategy() {
     }
@@ -89,54 +90,33 @@ public final class MachineStrategy {
         }
 
         private long resolveMachineId(long maxValue) {
+            long candidate = DEFAULT_MACHINE_HASH;
             if (maxValue < 0) {
-                return hashMachineAddress();
+                return candidate;
             }
-            long candidate = hashMachineAddress();
             return candidate % (maxValue + 1);
         }
 
-        private long hashMachineAddress() {
-            String machineText = firstNonLoopbackAddress();
-            if (machineText == null) {
-                machineText = fallbackLocalHostAddress();
-            }
-            if (machineText == null) {
-                machineText = "127.0.0.1";
-            }
-            CRC32 crc32 = new CRC32();
-            crc32.update(machineText.getBytes(StandardCharsets.UTF_8));
-            return crc32.getValue() & Long.MAX_VALUE;
-        }
+    }
 
-        private String firstNonLoopbackAddress() {
-            try {
-                Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
-                while (interfaces != null && interfaces.hasMoreElements()) {
-                    NetworkInterface networkInterface = interfaces.nextElement();
-                    if (!networkInterface.isUp() || networkInterface.isLoopback() || networkInterface.isVirtual()) {
-                        continue;
-                    }
-                    Enumeration<InetAddress> addresses = networkInterface.getInetAddresses();
-                    while (addresses.hasMoreElements()) {
-                        InetAddress address = addresses.nextElement();
-                        if (!address.isLoopbackAddress() && !address.isLinkLocalAddress()) {
-                            return address.getHostAddress();
-                        }
-                    }
-                }
-            } catch (SocketException e) {
-                return null;
-            }
-            return null;
+    private static String resolveMachineAddressText() {
+        List<String> addresses = NetworkUtils.getLocalIpAddresses();
+        if (addresses != null && !addresses.isEmpty()) {
+            return addresses.get(0);
         }
+        try {
+            String localHost = InetAddress.getLocalHost().getHostAddress();
+            if (localHost != null && !localHost.isBlank()) {
+                return localHost;
+            }
+        } catch (Exception ignored) {
+        }
+        return "127.0.0.1";
+    }
 
-        private String fallbackLocalHostAddress() {
-            try {
-                return InetAddress.getLocalHost().getHostAddress();
-            } catch (Exception e) {
-                return null;
-            }
-        }
+    private static long hashMachineAddress(String machineText) {
+        CRC32 crc32 = new CRC32();
+        crc32.update(machineText.getBytes(StandardCharsets.UTF_8));
+        return crc32.getValue() & Long.MAX_VALUE;
     }
 }
