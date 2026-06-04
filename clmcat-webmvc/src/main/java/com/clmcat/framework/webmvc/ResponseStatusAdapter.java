@@ -1,5 +1,7 @@
 package com.clmcat.framework.webmvc;
 
+import static com.clmcat.framework.webmvc.ResponseStatus.L_IP_LIMIT;
+
 /**
  * @author zhangxingyu
  *
@@ -72,7 +74,7 @@ public interface ResponseStatusAdapter {
     }
     /** ip限制 **/
     default ResponseErrorStatus ipLlimit() {
-        return ResponseStatus.R_IP_LIMIT;
+        return L_IP_LIMIT;
     }
     /* 没有开始 **/
     default ResponseErrorStatus notStart() {
@@ -104,7 +106,7 @@ public interface ResponseStatusAdapter {
     }
     /** 业务内调用远程API请求失败 */
     default ResponseErrorStatus businessRequestFail() {
-        return ResponseStatus.R_BUSINESS_REQUEST_FAIL;
+        return ResponseStatus.F_BUSINESS_REQUEST_FAIL;
     }
     /** 账户签名错误错误 */
     default ResponseErrorStatus accountSignError() {
@@ -132,7 +134,7 @@ public interface ResponseStatusAdapter {
 
     /** 频繁访问 */
     default ResponseErrorStatus frequentlyAccess() {
-        return ResponseStatus.R_FREQUENT_ACCESS;
+        return ResponseStatus.L_FREQUENT_ACCESS;
     }
 
     /** TOKEN无效 */
@@ -154,7 +156,7 @@ public interface ResponseStatusAdapter {
     // U_BLACKLIST
     /** 账户被拉黑 */
     default ResponseErrorStatus userBlacklist() {
-        return ResponseStatus.U_BLACKLIST;
+        return ResponseStatus.R_BLACKLIST;
     }
 
 

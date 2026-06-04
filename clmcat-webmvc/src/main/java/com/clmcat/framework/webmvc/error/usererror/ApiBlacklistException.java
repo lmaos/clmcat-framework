@@ -10,7 +10,7 @@ public class ApiBlacklistException extends ApiUserException {
 	
 	private static final long serialVersionUID = 1L;
 
-    public final static ResponseStatus responseStatus = ResponseStatus.U_BLACKLIST;
+    public final static ResponseStatus responseStatus = ResponseStatus.R_BLACKLIST;
 
     public ApiBlacklistException() {
         super(responseStatus);

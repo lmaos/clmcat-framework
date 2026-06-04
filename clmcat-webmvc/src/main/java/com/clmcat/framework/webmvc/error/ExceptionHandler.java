@@ -46,7 +46,7 @@ public class ExceptionHandler implements HandlerExceptionResolver, ApplicationCo
         REGISTER_STATUS.put(ResponseStatus.OK, (a) -> a.success());
         REGISTER_STATUS.put(ResponseStatus.ILLEGAL_STATE, (a) -> a.illegalState());
         REGISTER_STATUS.put(ResponseStatus.R_ALREADY_EXPIRED, (a) -> a.alreadyExpired());
-        REGISTER_STATUS.put(ResponseStatus.R_IP_LIMIT, (a) -> a.ipLlimit());
+        REGISTER_STATUS.put(ResponseStatus.L_IP_LIMIT, (a) -> a.ipLlimit());
         REGISTER_STATUS.put(ResponseStatus.R_NOT_START, (a) -> a.notStart());
         REGISTER_STATUS.put(ResponseStatus.R_ALREADY_START, (a) -> a.alreadyStart());
         REGISTER_STATUS.put(ResponseStatus.R_ALREADY_OVER, (a) -> a.alreadyOver());
@@ -57,15 +57,15 @@ public class ExceptionHandler implements HandlerExceptionResolver, ApplicationCo
         REGISTER_STATUS.put(ResponseStatus.R_STATUS_HIDE, (a) -> a.statusHide());
         REGISTER_STATUS.put(ResponseStatus.R_STATUS_CLOSE, (a) -> a.statusClose());
         REGISTER_STATUS.put(ResponseStatus.R_ACCOUNT_NOT_EXIST, (a) -> a.accountNotExist());
-        REGISTER_STATUS.put(ResponseStatus.R_BUSINESS_REQUEST_FAIL, (a) -> a.businessRequestFail());
+        REGISTER_STATUS.put(ResponseStatus.F_BUSINESS_REQUEST_FAIL, (a) -> a.businessRequestFail());
         REGISTER_STATUS.put(ResponseStatus.R_ACCOUNT_SIGN_ERROR, (a) -> a.accountSignError());
         REGISTER_STATUS.put(ResponseStatus.R_NOEXIST_DATA, (a) -> a.noExistData());
         REGISTER_STATUS.put(ResponseStatus.R_EXIST_DATA, (a) -> a.existData());
-        REGISTER_STATUS.put(ResponseStatus.R_FREQUENT_ACCESS, (a) -> a.frequentlyAccess());
+        REGISTER_STATUS.put(ResponseStatus.L_FREQUENT_ACCESS, (a) -> a.frequentlyAccess());
         REGISTER_STATUS.put(ResponseStatus.AUTH_LOGIN_FAIL, (a) -> a.authLoginFail());
         REGISTER_STATUS.put(ResponseStatus.AUTH_TOKEN_INVALID, (a) -> a.authTokenInvalid());
         REGISTER_STATUS.put(ResponseStatus.U_FREEZE, (a) -> a.userFreeze());
-        REGISTER_STATUS.put(ResponseStatus.U_BLACKLIST, (a) -> a.userBlacklist());
+        REGISTER_STATUS.put(ResponseStatus.R_BLACKLIST, (a) -> a.userBlacklist());
     }
 
 

@@ -66,12 +66,17 @@ public interface ResponseErrorStatus {
 		return new ApiResultException(this);
 	}
 
+
 	/**
 	 * 转换为api异常
 	 */
 	default ApiException apiEx() {
 		return new ApiException(this);
 	}
+
+    default ApiException apiEx(String message) {
+        return new ApiException(this).setMessage(message);
+    }
 
 	/**
 	 * 直接抛出结果异常--中断在这一行

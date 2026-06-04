@@ -10,7 +10,7 @@ public class ApiIpLimitException extends ApiResultException {
 	
 	private static final long serialVersionUID = 1L;
 
-    public final static ResponseStatus responseStatus = ResponseStatus.R_IP_LIMIT;
+    public final static ResponseStatus responseStatus = ResponseStatus.L_IP_LIMIT;
 
     public ApiIpLimitException() {
         super(responseStatus);
