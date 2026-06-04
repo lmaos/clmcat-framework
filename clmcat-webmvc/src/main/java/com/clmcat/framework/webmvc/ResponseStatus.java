@@ -112,8 +112,8 @@ public enum ResponseStatus implements ResponseErrorStatus {
 	 */
 	public final static class HttpStatusValue {
 
-		public static final int A_ERROR_STATUS = 403; // 权限错误
-		public static final int U_ERROR_STATUS = 401; // 用户错误
+		public static final int A_ERROR_STATUS = 403; // 登录之后，403，权限异常 需要退出登录
+		public static final int U_ERROR_STATUS = 401; // 登陆之前，登陆失败异常的状态。
 		public static final int P_ERROR_STATUS = 400; // 参数错误
 		public static final int R_ERROR_STATUS = 422; // 结果错误 - 业务状态码, 业务执行逻辑中触发的。
 		public static final int S_ERROR_STATUS = 500; // 系统错误状态
