@@ -5,6 +5,7 @@ import java.util.List;
 
 import com.clmcat.framework.webmvc.error.ExceptionHandler;
 import com.clmcat.framework.webmvc.interceptor.LocaleParameterInjector;
+import com.clmcat.framework.webmvc.interceptor.CorsRequestFilter;
 import com.clmcat.framework.webmvc.interceptor.RequestInterceptor;
 import com.clmcat.framework.webmvc.interceptor.TokenParameterInjector;
 import com.clmcat.framework.webmvc.interceptor.reqparam.RequestParamInjector;
@@ -87,10 +88,25 @@ public class WebMvcConfiguration implements WebMvcConfigurer, SmartInitializingS
         return new FormContentFilter();
     }
 
+    @Bean
+    @ConditionalOnMissingBean
+    CorsRequestFilter corsRequestFilter() {
+        return new CorsRequestFilter();
+    }
+
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(requestInterceptor()).order(-1);
     }
+
+//    @Override
+//    public void addCorsMappings(CorsRegistry registry) {
+//        registry.addMapping("/**")
+//                .allowedOriginPatterns("*")
+//                .allowedMethods("OPTIONS", "GET", "POST", "PUT", "DELETE")
+//                .allowedHeaders("*")
+//                .maxAge(3600);
+//    }
 
     @Override
     public void afterSingletonsInstantiated() {

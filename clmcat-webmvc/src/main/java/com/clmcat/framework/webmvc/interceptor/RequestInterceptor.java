@@ -85,7 +85,7 @@ public class RequestInterceptor implements HandlerInterceptor, ApplicationContex
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
         configRequestAttribute(request, response);
     	requestTrace(request, response);
-    	corsConfig.setCors(request, response);
+    	//corsConfig.setCors(request, response);
         if (handler instanceof HandlerMethod) {
             HandlerMethod handlerMethod = (HandlerMethod) handler;
             configHandlerMethodRequestAttribute(request, response, handlerMethod);
